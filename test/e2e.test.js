@@ -13,6 +13,8 @@ import http from 'node:http';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pbiv-e2e-'));
 process.env.DATA_DIR = tmp;
 process.env.LOG_LEVEL = 'warn';
+// Never call a real AI endpoint from tests, even if .env holds a key.
+Object.assign(process.env, { NVIDIA_API_KEY: '', AI_API_KEY: '', AI_AUTO_ANALYZE: 'false' });
 
 const fixture = fs.readFileSync(new URL('./fixtures/mock-report.html', import.meta.url));
 let server, base, db, queue;

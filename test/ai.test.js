@@ -89,7 +89,7 @@ test('run analysis, vision explanation and Q&A end-to-end', { timeout: 300000 },
   // Request contract: bearer key, configured models, digest content, PNG image part.
   assert.ok(requests.every((r) => r.auth === 'Bearer nvapi-test-key' && r.path === '/v1/chat/completions'));
   const summaryReq = requests.find((r) => /Triage this validation run/.test(r.body.messages.at(-1).content));
-  assert.equal(summaryReq.body.model, 'nvidia/nemotron-3-super-120b-a12b');
+  assert.equal(summaryReq.body.model, 'nvidia/nemotron-3-ultra-550b-a55b');
   assert.match(summaryReq.body.messages.at(-1).content, /\[DIFF\] visual \| page: Overview \| Card · Total Sales/);
   assert.match(summaryReq.body.messages.at(-1).content, /"280,000" → "285,285"/);
   const visionReq = requests.find((r) => Array.isArray(r.body.messages.at(-1).content));

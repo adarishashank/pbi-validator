@@ -43,7 +43,7 @@ export const config = {
   ai: {
     apiKey: process.env.NVIDIA_API_KEY || process.env.AI_API_KEY || '',
     baseUrl: process.env.AI_BASE_URL || 'https://integrate.api.nvidia.com/v1',
-    textModel: process.env.AI_TEXT_MODEL || 'nvidia/nemotron-3-super-120b-a12b',
+    textModel: process.env.AI_TEXT_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b',
     visionModel: process.env.AI_VISION_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
     allowNoKey: bool(process.env.AI_ALLOW_NO_KEY, false), // self-hosted NIM without auth
     allowImages: bool(process.env.AI_ALLOW_IMAGES, true),

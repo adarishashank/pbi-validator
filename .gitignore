@@ -3,3 +3,4 @@ data/
 .probe/
 .env
 *.log
+.DS_Store

@@ -189,7 +189,7 @@ export async function explainResult(resultId) {
   try {
     const out = await chatJson({
       model: config.ai.visionModel,
-      maxTokens: 1200,
+      maxTokens: 2500,
       messages: [
         { role: 'system', content: 'You are a meticulous visual QA reviewer for Power BI dashboards. Describe concrete, observable differences only.' },
         { role: 'user', content: [

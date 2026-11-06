@@ -31,7 +31,7 @@ With a free [NVIDIA API key](https://build.nvidia.com) in `.env` (`NVIDIA_API_KE
 
 | Feature | Model (default, configurable) | Where |
 |---|---|---|
-| **Executive summary & triage**: headline, risk level, findings grouped and ranked by severity, likely root causes (dataset refresh, DAX/measure change, filter/RLS, layout edit, broken navigation), what's probably noise, next steps | `nvidia/nemotron-3-super-120b-a12b` | Run → **AI insights** |
+| **Executive summary & triage**: headline, risk level, findings grouped and ranked by severity, likely root causes (dataset refresh, DAX/measure change, filter/RLS, layout edit, broken navigation), what's probably noise, next steps | `nvidia/nemotron-3-ultra-550b-a55b` | Run → **AI insights** |
 | **Data-anomaly review**: totals that don't reconcile with breakdowns, percentages that don't add up, unexpected blanks/zeros, implausible values, unusual A→B shifts | same | Run → **AI insights** |
 | **Screenshot explanations**: a vision model compares the A/B screenshots of the top differences and describes what visibly changed, flagging likely rendering noise | `nvidia/nemotron-3.5-super-vl-120b-a12b` | Each result → **AI screenshot analysis** |
 | **Ask AI**: chat with a run ("Which slicer values broke?", "Is the total difference real or rounding?"), with answers citing `#check` numbers you can click | text model | Run → **Ask AI** |
