@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock Power BI report</title>
+<!--
+  Test double that reproduces the Power BI renderer DOM contract observed on
+  app.powerbi.com (visual-container / data-testid / aria-roledescription /
+  sectionItem / slicerItemContainer / pbimenu-item / role=grid ...).
+  ?v=b introduces deliberate regressions used by the automated tests.
+-->
+<style>
+  body { margin: 0; font: 13px Arial, sans-serif; background: #eaeaea; }
+  .navigation-wrapper { position: fixed; bottom: 0; left: 0; right: 0; height: 30px; background: #ddd; display: flex; gap: 8px; align-items: center; padding: 0 10px; }
+  .pagelist { position: fixed; bottom: 32px; left: 60px; background: #fff; border: 1px solid #999; display: none; flex-direction: column; }
+  .pagelist.open { display: flex; }
+  .sectionItem.selected { font-weight: bold; }
+  [data-testid="display-area"] { position: absolute; left: 20px; top: 20px; width: 1280px; height: 720px; background: #fff; }
+  [data-testid="visual-container"] { position: absolute; box-sizing: border-box; border: 1px solid #ccc; background: #fff; }
+  .visualContainer { position: relative; width: 100%; height: 100%; }
+  .vcHeader { position: absolute; right: 2px; top: 2px; display: none; gap: 2px; z-index: 5; }
+  .visualContainer:hover .vcHeader { display: flex; }
+  .vcHeader button { width: 22px; height: 18px; font-size: 10px; padding: 0; }
+  [data-testid="visual-title"] { font-weight: bold; padding: 4px 6px; }
+  .visual { position: absolute; left: 0; right: 0; top: 24px; bottom: 0; }
+  .cardValue { font-size: 34px; padding: 10px; }
+  .slicerItemContainer { padding: 3px 8px; cursor: pointer; }
+  .slicerItemContainer[aria-checked="true"] { background: #cde; }
+  .slicer-header-clear { position: absolute; right: 6px; top: 4px; width: 12px; height: 12px; background: #c33; cursor: pointer; }
+  [role="grid"] { border-collapse: collapse; margin: 4px; }
+  [role="grid"] div[role="row"] { display: flex; }
+  [role="grid"] div[role="row"] > div { width: 120px; padding: 2px 4px; border-bottom: 1px solid #eee; }
+  .expandCollapseButton { display: inline-block; width: 12px; cursor: pointer; }
+  .tooltip-container { position: fixed; background: #333; color: #fff; padding: 6px 8px; display: none; z-index: 20; }
+  .menu { position: fixed; background: #fff; border: 1px solid #888; display: none; z-index: 30; }
+  .menu [role="menuitem"] { padding: 4px 12px; cursor: pointer; }
+  [data-testid="spinner"] { position: fixed; left: 50%; top: 50%; width: 0; height: 0; }
+  [data-testid="spinner"].on { width: 40px; height: 40px; background: #09f; }
+  .actionBtn { width: 100%; height: 100%; background: #246; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+</style>
+</head>
+<body>
+<div data-testid="display-area" id="canvas"></div>
+<div class="pagelist" id="pagelist"></div>
+<span class="navigation-wrapper">
+  <button aria-label="Previous Page" id="prev">‹</button>
+  <a class="middleText" id="counter"></a>
+  <button aria-label="Next Page" id="next">›</button>
+</span>
+<div class="tooltip-container" id="tip"></div>
+<div class="menu" id="menu"></div>
+<div data-testid="spinner" id="spin"></div>
+<script>
+const B = new URLSearchParams(location.search).get('v') === 'b';
+const PAGES = B ? ['Overview', 'Details', 'Trend Analysis'] : ['Overview', 'Details', 'Trends', 'Archive'];
+const SALES = { North: 100, South: 80, East: 60, West: B ? 45 : 40 };
+const CITIES = { North: { Leeds: B ? 61 : 60, York: 40 }, South: { Brighton: 50, Dover: 30 }, East: { Norwich: 35, Ipswich: 25 }, West: { Bath: 20, Bristol: B ? 25 : 20 } };
+const MATRIX = [
+  { name: 'Bikes', value: 500, kids: [['Road', 300], ['Mountain', 200]] },
+  { name: 'Accessories', value: 120, kids: [['Helmets', B ? 75 : 70], ['Locks', 50]] },
+  { name: 'Clothing', value: 80, kids: [['Jerseys', 50], ['Gloves', 30]] },
+];
+const st = { page: 0, region: null, level: 0, drillRegion: null, expanded: new Set() };
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function vc({ type, role, title, x, y, w, h, body, header = '', label }) {
+  return `<visual-container><div data-testid="visual-container" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px">
+    <div class="visualContainer" role="group" aria-roledescription="${role}" ${label || title ? `aria-label="${esc(label || title)}"` : ''}>
+      ${header ? `<div class="vcHeader">${header}</div>` : ''}
+      ${title ? `<div data-testid="visual-title">${esc(title)}</div>` : ''}
+      <div data-testid="visual-content-desc" class="visual customPadding visual-${type}">${body}</div>
+    </div></div></visual-container>`;
+}
+
+function total() {
+  if (st.region) return SALES[st.region];
+  return Object.values(SALES).reduce((a, b) => a + b, 0) * (B ? 1001 : 1000);
+}
+
+function chartBody() {
+  const data = st.level === 0 ? (st.region ? { [st.region]: SALES[st.region] } : SALES)
+    : st.drillRegion ? CITIES[st.drillRegion] : Object.assign({}, ...Object.values(CITIES));
+  const keys = Object.keys(data);
+  const bw = 40, gap = 20;
+  let svg = `<svg width="440" height="230"><g class="x axis" role="listbox">`;
+  keys.forEach((k, i) => { svg += `<text role="option" x="${20 + i * (bw + gap)}" y="225">${esc(k)}<title>${esc(k)}</title></text>`; });
+  svg += `</g><g class="series" role="listbox" aria-label="Sales">`;
+  keys.forEach((k, i) => {
+    const hgt = data[k] * 1.8;
+    svg += `<rect class="bar" role="option" aria-label="${data[k]}" data-k="${esc(k)}" x="${20 + i * (bw + gap)}" y="${205 - hgt}" width="${bw}" height="${hgt}" fill="#3a7"></rect>`;
+  });
+  return svg + '</g></svg>';
+}
+
+function matrixBody() {
+  let h = '<div role="grid"><div role="row"><div role="columnheader">Category</div><div role="columnheader">Sales</div></div>';
+  for (const r of MATRIX) {
+    const open = st.expanded.has(r.name);
+    h += `<div role="row"><div role="rowheader"><span class="expandCollapseButton" aria-expanded="${open}" data-row="${r.name}">${open ? '−' : '+'}</span>${r.name}</div><div role="gridcell">${r.value}</div></div>`;
+    if (open) for (const [k, v] of r.kids) h += `<div role="row"><div role="rowheader">&nbsp;&nbsp;${k}</div><div role="gridcell">${v}</div></div>`;
+  }
+  return h + '</div>';
+}
+
+function render() {
+  const c = document.getElementById('canvas');
+  const p = PAGES[st.page];
+  let html = '';
+  if (p === 'Overview') {
+    html += vc({ type: 'card', role: 'Card', title: 'Total Sales', x: 20, y: 20, w: 300, h: 110, body: `<div class="cardValue">${total().toLocaleString('en-US')}</div>` });
+    const items = ['Select all', ...Object.keys(SALES)];
+    html += vc({ type: 'slicer', role: 'Slicer', title: '', x: 20, y: 150, w: 300, h: 220,
+      body: `<div class="slicer-header"><span class="slicer-header-clear" aria-label="Clear selections" role="button"></span><h3 class="slicer-header-text" title="Region">Region</h3></div>
+        ${items.map((it) => `<div class="slicerItemContainer" role="option" title="${it}" aria-checked="${st.region === it}">${it}</div>`).join('')}` });
+    html += vc({ type: 'clusteredColumnChart', role: 'Clustered column chart', title: st.level ? 'Sales by City' : 'Sales by Region', x: 360, y: 20, w: 460, h: 300, body: chartBody(),
+      label: 'Sales by Region',
+      header: `<button aria-label="Drill up" ${st.level === 0 ? 'disabled' : ''}>↑</button><button aria-label="Expand all down one level in the hierarchy" ${st.level ? 'disabled' : ''}>⇊</button>` });
+    html += vc({ type: 'actionButton', role: 'button', title: '', label: 'Go to Details . Click here to follow', x: 860, y: 20, w: 200, h: 60, body: '<div class="actionBtn" id="goDetails">Go to Details</div>' });
+    html += vc({ type: 'textbox', role: 'Text box', title: '', x: 860, y: 120, w: 300, h: 60, body: `<p>Sales overview for FY26</p>` });
+  } else if (p === 'Details') {
+    html += vc({ type: 'pivotTable', role: 'Matrix', title: 'Sales by Category', x: 20, y: 20, w: 400, h: 320, body: matrixBody() });
+    if (!B) html += vc({ type: 'textbox', role: 'Text box', title: '', x: 460, y: 20, w: 300, h: 80, body: '<p>Notes: figures exclude returns</p>' });
+    else html += vc({ type: 'card', role: 'Card', title: 'New KPI', x: 460, y: 260, w: 200, h: 100, body: '<div class="cardValue">42</div>' });
+  } else {
+    html += vc({ type: 'lineChart', role: 'Line chart', title: 'Monthly trend', x: 20, y: 20, w: 600, h: 300,
+      body: `<svg width="580" height="250"><g class="series" role="listbox"><circle role="option" aria-label="Jan 10" cx="50" cy="200" r="5"></circle><circle role="option" aria-label="Feb 20" cx="150" cy="150" r="5"></circle></g></svg>` });
+  }
+  c.innerHTML = html;
+  document.getElementById('counter').innerHTML = `<span class="innerText">${st.page + 1}</span> <span class="innerText">of</span> <span class="innerText">${PAGES.length}</span>`;
+  document.getElementById('pagelist').innerHTML = PAGES.map((n, i) => `<button class="sectionItem${i === st.page ? ' selected' : ''}" aria-label="${n}" data-i="${i}">${n}</button>`).join('');
+}
+
+// Simulated asynchronous query + render, like a real report.
+function update(fn) {
+  fn();
+  const s = document.getElementById('spin');
+  s.classList.add('on');
+  setTimeout(() => { render(); s.classList.remove('on'); }, 250);
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  document.getElementById('menu').style.display = 'none';
+  if (t.closest('#counter')) { document.getElementById('pagelist').classList.toggle('open'); return; }
+  if (t.matches('.sectionItem')) { document.getElementById('pagelist').classList.remove('open'); return update(() => { st.page = +t.dataset.i; }); }
+  if (t.closest('#next')) return st.page < PAGES.length - 1 && update(() => { st.page++; });
+  if (t.closest('#prev')) return st.page > 0 && update(() => { st.page--; });
+  if (t.closest('#goDetails')) return update(() => { st.page = B ? 2 : 1; });
+  if (t.matches('.slicer-header-clear')) return update(() => { st.region = null; });
+  const item = t.closest('.slicerItemContainer');
+  if (item) return update(() => { st.region = item.title === 'Select all' ? null : item.title; });
+  if (t.matches('rect.bar') && st.level === 0) return update(() => { st.region = st.region === t.dataset.k ? null : t.dataset.k; });
+  if (t.matches('[aria-label="Drill up"]') && !t.disabled) return update(() => { st.level = 0; st.drillRegion = null; });
+  if (t.matches('[aria-label^="Expand all down"]') && !t.disabled) return update(() => { st.level = 1; st.drillRegion = null; });
+  if (t.matches('[role="menuitem"][data-act="drill"]')) return update(() => { st.level = 1; st.drillRegion = document.getElementById('menu').dataset.k; });
+  if (t.matches('.expandCollapseButton')) return update(() => { const r = t.dataset.row; st.expanded.has(r) ? st.expanded.delete(r) : st.expanded.add(r); });
+});
+document.addEventListener('contextmenu', (e) => {
+  const bar = e.target.closest('rect.bar');
+  if (!bar) return;
+  e.preventDefault();
+  const m = document.getElementById('menu');
+  m.dataset.k = bar.dataset.k;
+  m.innerHTML = `${st.level === 0 ? '<div role="menuitem" data-act="drill" data-testid="pbimenu-item.Drill down">Drill down</div>' : ''}<div role="menuitem" data-testid="pbimenu-item.Show as a table">Show as a table</div>`;
+  Object.assign(m.style, { display: 'block', left: `${e.clientX}px`, top: `${e.clientY}px` });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { document.getElementById('menu').style.display = 'none'; document.getElementById('pagelist').classList.remove('open'); }
+});
+document.addEventListener('mouseover', (e) => {
+  const tip = document.getElementById('tip');
+  const pt = e.target.closest('rect.bar, circle[role="option"]');
+  if (!pt) { tip.style.display = 'none'; return; }
+  tip.innerText = `${pt.dataset.k ? `Region: ${pt.dataset.k}\n` : ''}Value: ${pt.getAttribute('aria-label')}`;
+  Object.assign(tip.style, { display: 'block', left: `${e.clientX + 12}px`, top: `${e.clientY + 12}px` });
+});
+setTimeout(render, 400);
+</script>
+</body>
+</html>

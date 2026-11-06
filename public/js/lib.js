@@ -1,0 +1,106 @@
+import { h, render } from '/vendor/preact.mjs';
+import { useState, useEffect, useRef, useCallback, useMemo } from '/vendor/hooks.mjs';
+import htm from '/vendor/htm.mjs';
+
+export const html = htm.bind(h);
+export { h, render, useState, useEffect, useRef, useCallback, useMemo };
+
+// ------------------------------------------------------------------ store
+const listeners = new Set();
+export const store = { toasts: [], modal: null, lightbox: null, tokenPrompt: false };
+export function setStore(patch) {
+  Object.assign(store, typeof patch === 'function' ? patch(store) : patch);
+  listeners.forEach((l) => l());
+}
+export function useStore() {
+  const [, force] = useState(0);
+  useEffect(() => { const l = () => force((n) => n + 1); listeners.add(l); return () => listeners.delete(l); }, []);
+  return store;
+}
+
+let toastId = 0;
+export function toast(msg, kind = '') {
+  const id = ++toastId;
+  setStore((s) => ({ toasts: [...s.toasts, { id, msg, kind }] }));
+  setTimeout(() => setStore((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === 'err' ? 7000 : 3500);
+}
+
+// -------------------------------------------------------------------- api
+export class ApiError extends Error {}
+export async function api(path, { method = 'GET', body, raw } = {}) {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    const j = await res.json().catch(() => ({}));
+    if (j.tokenRequired) { setStore({ tokenPrompt: true }); throw new ApiError('Authentication required'); }
+  }
+  if (raw) return res;
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(data?.error || `${res.status} ${res.statusText}`);
+  return data;
+}
+
+/** Data hook with reload + optional polling. */
+export function useApi(path, { poll = 0, deps = [] } = {}) {
+  const [state, setState] = useState({ data: null, error: null, loading: true });
+  const reload = useCallback(async () => {
+    if (!path) return;
+    try { const data = await api(path); setState({ data, error: null, loading: false }); }
+    catch (e) { setState((s) => ({ ...s, error: e.message, loading: false })); }
+  }, [path]);
+  useEffect(() => { reload(); }, [reload, ...deps]);
+  useEffect(() => {
+    if (!poll) return undefined;
+    const t = setInterval(reload, poll);
+    return () => clearInterval(t);
+  }, [reload, poll]);
+  return { ...state, reload };
+}
+
+// ---------------------------------------------------------------- router
+export function useRoute() {
+  const [hash, setHash] = useState(location.hash || '#/');
+  useEffect(() => {
+    const on = () => setHash(location.hash || '#/');
+    addEventListener('hashchange', on);
+    return () => removeEventListener('hashchange', on);
+  }, []);
+  const [pathPart, query = ''] = hash.slice(1).split('?');
+  return { parts: pathPart.split('/').filter(Boolean), query: new URLSearchParams(query) };
+}
+export const go = (path) => { location.hash = path; };
+
+// --------------------------------------------------------------- formats
+export const fmtDate = (s) => (s ? new Date(s.endsWith('Z') || s.includes('T') ? s : `${s.replace(' ', 'T')}Z`).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+export function fmtAgo(s) {
+  if (!s) return '—';
+  const d = new Date(s.includes('T') ? s : `${s.replace(' ', 'T')}Z`);
+  const sec = Math.round((Date.now() - d) / 1000);
+  if (sec < 60) return 'just now';
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+export function fmtDur(ms) {
+  if (ms == null) return '—';
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+export function runDuration(r) {
+  if (r.summary?.durationMs) return fmtDur(r.summary.durationMs);
+  if (r.started_at && !r.finished_at) return fmtDur(Date.now() - new Date(r.started_at));
+  return '—';
+}
+export const pct = (r) => (r == null ? '' : r === 0 ? '0%' : r < 0.0001 ? '<0.01%' : `${(r * 100).toFixed(r < 0.01 ? 2 : 1)}%`);
+
+export const STATUS_ORDER = ['fail', 'error', 'missing', 'diff', 'warn', 'pass', 'skipped'];
+export const STATUS_LABEL = { pass: 'Pass', diff: 'Diff', fail: 'Fail', missing: 'Missing', error: 'Error', warn: 'Warn', skipped: 'Skipped' };
+export const SCENARIO_LABEL = {
+  report_pages: 'Pages', health: 'Health', page_render: 'Page render', structure: 'Layout', visual: 'Visual',
+  button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',
+};

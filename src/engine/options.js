@@ -1,0 +1,87 @@
+import { z } from 'zod';
+
+/**
+ * Suite configuration. Every field has a production-sensible default so a
+ * suite can be created with `{}` and tuned later from the UI.
+ */
+export const SuiteConfigSchema = z.object({
+  viewport: z.object({
+    width: z.number().int().min(800).max(3840).default(1920),
+    height: z.number().int().min(600).max(2160).default(1080),
+  }).prefault({}),
+  locale: z.string().default('en-US'),
+  timezone: z.string().default('UTC'),
+  pages: z.object({
+    // Page names or /regex/ strings. Empty include = all pages.
+    include: z.array(z.string()).default([]),
+    exclude: z.array(z.string()).default([]),
+  }).prefault({}),
+  scenarios: z.object({
+    pageRender: z.boolean().default(true),     // full page screenshot diff + health
+    structure: z.boolean().default(true),      // visual inventory, type, title, layout
+    visuals: z.boolean().default(true),        // per-visual screenshot + data diff
+    buttons: z.boolean().default(true),        // action buttons / navigators / bookmarks
+    slicers: z.boolean().default(true),        // apply slicer values, compare whole page
+    drill: z.boolean().default(true),          // hierarchy drill down / expand next level
+    matrixExpand: z.boolean().default(true),   // matrix +/- row hierarchy expansion
+    crossFilter: z.boolean().default(true),    // click data points, compare cross-filtering
+    tooltips: z.boolean().default(true),       // hover data points, compare tooltip content
+  }).prefault({}),
+  limits: z.object({
+    slicerValues: z.number().int().min(0).max(20).default(2),
+    buttonsPerPage: z.number().int().min(0).max(100).default(25),
+    drillPerPage: z.number().int().min(0).max(50).default(10),
+    crossFilterPerPage: z.number().int().min(0).max(50).default(4),
+    tooltipsPerPage: z.number().int().min(0).max(50).default(4),
+    matrixExpandRows: z.number().int().min(1).max(20).default(3),
+    maxVisualsPerPage: z.number().int().min(1).max(500).default(150),
+  }).prefault({}),
+  thresholds: z.object({
+    pixelThreshold: z.number().min(0).max(1).default(0.1),     // pixelmatch per-pixel colour tolerance
+    maxDiffRatio: z.number().min(0).max(1).default(0.002),     // fraction of differing pixels tolerated
+    positionTolerancePx: z.number().min(0).max(200).default(4),
+    numericTolerance: z.number().min(0).default(0),            // relative tolerance for numbers in data
+    shiftTolerancePx: z.number().int().min(0).max(3).default(1), // ignore sub-pixel layout jitter
+  }).prefault({}),
+  ignore: z.object({
+    visualTypes: z.array(z.string()).default(['shape', 'image', 'basicShape']),
+    visualTitles: z.array(z.string()).default([]),             // names or /regex/
+    textPatterns: z.array(z.string()).default([]),             // regex stripped from extracted text
+    maskSelectors: z.array(z.string()).default([]),            // CSS selectors masked in screenshots
+  }).prefault({}),
+  timing: z.object({
+    loadTimeoutMs: z.number().int().min(10000).max(600000).default(120000),
+    stableTimeoutMs: z.number().int().min(2000).max(300000).default(45000),
+    settleMs: z.number().int().min(0).max(30000).default(700),
+    actionTimeoutMs: z.number().int().min(1000).max(120000).default(15000),
+  }).prefault({}),
+  ai: z.object({
+    enabled: z.boolean().default(true),        // AI summary, triage & anomaly analysis after each run
+    vision: z.boolean().default(true),         // send diff screenshots to the vision model
+    maxVisionItems: z.number().int().min(0).max(50).default(8),
+  }).prefault({}),
+  resetToDefaultOnLoad: z.boolean().default(true),
+  retries: z.number().int().min(0).max(3).default(1),
+  selectors: z.record(z.string(), z.any()).default({}),
+});
+
+export function parseSuiteConfig(raw) {
+  return SuiteConfigSchema.parse(raw ?? {});
+}
+
+export const DEFAULT_SUITE_CONFIG = parseSuiteConfig({});
+
+/** Turns "Sales" / "/^Sales.*$/i" into a matcher. */
+export function toMatcher(pattern) {
+  const m = /^\/(.*)\/([a-z]*)$/.exec(pattern);
+  if (m) {
+    const re = new RegExp(m[1], m[2]);
+    return (s) => re.test(s ?? '');
+  }
+  const needle = pattern.trim().toLowerCase();
+  return (s) => (s ?? '').trim().toLowerCase() === needle;
+}
+
+export function anyMatch(patterns, value) {
+  return patterns.some((p) => toMatcher(p)(value));
+}

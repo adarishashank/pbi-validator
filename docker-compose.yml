@@ -1,0 +1,25 @@
+# Cloud VM hosting behind Cloudflare (no open inbound ports):
+#   1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → Create tunnel
+#      → copy the token, add a Public Hostname pointing to http://validator:4400
+#   2. echo "TUNNEL_TOKEN=..." >> .env ; echo "API_TOKEN=$(openssl rand -hex 24)" >> .env
+#   3. docker compose up -d
+services:
+  validator:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      DATA_DIR: /data
+    volumes:
+      - pbi-data:/data
+    shm_size: 1gb            # Chromium needs more than Docker's 64 MB default
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    depends_on: [validator]
+volumes:
+  pbi-data:
