@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { config } from './config.js';
 
@@ -94,9 +95,72 @@ CREATE TABLE IF NOT EXISTS ai_analyses (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ai_run ON ai_analyses(run_id, kind, id);
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  name TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT 'viewer',
+  provider TEXT NOT NULL DEFAULT 'local',
+  password_hash TEXT,
+  ms_oid TEXT,
+  ms_tid TEXT,
+  disabled INTEGER NOT NULL DEFAULT 0,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  last_login_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ms ON users(ms_tid, ms_oid) WHERE ms_oid IS NOT NULL;
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  method TEXT NOT NULL,
+  ip TEXT,
+  user_agent TEXT,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  absolute_expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  last_used_at TEXT,
+  expires_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  user_id INTEGER,
+  user_email TEXT,
+  action TEXT NOT NULL,
+  target TEXT,
+  status INTEGER,
+  ip TEXT,
+  detail TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(id DESC);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `);
 
-const JSON_COLS = new Set(['config', 'snapshot', 'summary', 'images', 'details', 'last_discovery', 'content']);
+// Additive migrations for databases created by earlier versions.
+const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+if (!hasColumn('runs', 'triggered_by')) db.exec('ALTER TABLE runs ADD COLUMN triggered_by TEXT');
+
+// The database holds password hashes and SSO settings: owner-only access.
+for (const f of [config.dbPath, `${config.dbPath}-wal`, `${config.dbPath}-shm`]) {
+  try { fs.chmodSync(f, 0o600); } catch { /* not created yet */ }
+}
+
+const JSON_COLS = new Set(['config', 'snapshot', 'summary', 'images', 'details', 'last_discovery', 'content', 'detail', 'value']);
 
 function hydrate(row) {
   if (!row) return row;

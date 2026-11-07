@@ -53,7 +53,7 @@ export function Profiles() {
 
   return html`
     <${Topbar} title="Auth profiles" sub="Saved Microsoft sessions used to open secured reports headlessly. Each report link can use a different profile (e.g. different tenants for A and B).">
-      <button class="btn primary" onClick=${() => edit(null)}>+ New profile</button>
+      <button class="btn ed primary" onClick=${() => edit(null)}>+ New profile</button>
     </${Topbar}>
     <div class="content stack">
       <div class="callout info">ℹ <div><b>How it works:</b> “Sign in” opens a real browser window on the machine running the validator. Complete SSO/MFA there; once Power BI loads, the session is captured to <code>data/auth</code> (owner-only file permissions) and the window closes. Public “publish to web” links need no profile.</div></div>
@@ -64,12 +64,12 @@ export function Profiles() {
           <td><div class="row"><${Badge} s=${p.status} />${p.status === 'signing_in' && html`<${Spinner} />`}</div><div class="small muted">${p.status_detail}</div></td>
           <td class="muted">${fmtAgo(p.last_login_at)}</td><td class="muted">${fmtAgo(p.last_checked_at)}</td>
           <td style="text-align:right"><div class="row" style="justify-content:flex-end">
-            <button class="btn sm primary" onClick=${() => login(p)} disabled=${p.status === 'signing_in'}>Sign in</button>
-            <button class="btn sm" onClick=${() => check(p)} disabled=${!p.has_session}>Check</button>
-            <button class="btn sm" onClick=${() => setStore({ modal: html`<${ImportForm} profile=${p} onDone=${reload} />` })}>Import</button>
-            <button class="btn sm ghost" onClick=${() => edit(p)}>Edit</button>
-            ${p.has_session && html`<button class="btn sm ghost" onClick=${() => forget(p)}>Sign out</button>`}
-            <button class="btn sm ghost danger" onClick=${() => del(p)}>Delete</button></div></td></tr>`)}
+            <button class="btn ed sm primary" onClick=${() => login(p)} disabled=${p.status === 'signing_in'}>Sign in</button>
+            <button class="btn ed sm" onClick=${() => check(p)} disabled=${!p.has_session}>Check</button>
+            <button class="btn ed sm" onClick=${() => setStore({ modal: html`<${ImportForm} profile=${p} onDone=${reload} />` })}>Import</button>
+            <button class="btn ed sm ghost" onClick=${() => edit(p)}>Edit</button>
+            ${p.has_session && html`<button class="btn ed sm ghost" onClick=${() => forget(p)}>Sign out</button>`}
+            <button class="btn ed sm ghost danger" onClick=${() => del(p)}>Delete</button></div></td></tr>`)}
       </tbody></table></div>`}
     </div>`;
 }

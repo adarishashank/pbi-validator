@@ -13,7 +13,7 @@ export function Dashboard() {
 
   return html`
     <${Topbar} title="Dashboard" sub="End-to-end validation of Power BI reports: pages, visuals, data, buttons, slicers, hierarchies and interactions.">
-      <a class="btn primary" href="#/suites">Run a suite</a>
+      <a class="btn ed primary" href="#/suites">Run a suite</a>
     </${Topbar}>
     <div class="content stack">
       ${needLogin.length > 0 && html`<div class="callout warn">⚠ <div><b>${needLogin.length} auth profile(s) need sign-in:</b> ${needLogin.map((p) => p.name).join(', ')}. Runs that use them will be redirected to the Microsoft login page. <a href="#/profiles">Sign in →</a></div></div>`}

@@ -232,7 +232,7 @@ router.delete('/suites/:id', wrap((req, res) => {
 }));
 router.post('/suites/:id/run', wrap((req, res) => {
   const id = idParam(req); mustGet('suites', id);
-  const runId = runQueue.enqueue(id, 'manual');
+  const runId = runQueue.enqueue(id, 'manual', req.user?.email || null);
   res.status(202).json({ runId });
 }));
 
@@ -242,7 +242,7 @@ router.get('/runs', (req, res) => {
   if (req.query.suite) { where.push('suite_id = ?'); params.push(Number(req.query.suite)); }
   if (req.query.status) { where.push('status = ?'); params.push(String(req.query.status)); }
   const limit = Math.min(Number(req.query.limit) || 100, 500);
-  res.json(q.all(`SELECT id, suite_id, suite_name, trigger, status, progress, phase, summary, error, queued_at, started_at, finished_at FROM runs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ${limit}`, ...params));
+  res.json(q.all(`SELECT id, suite_id, suite_name, trigger, triggered_by, status, progress, phase, summary, error, queued_at, started_at, finished_at FROM runs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ${limit}`, ...params));
 });
 router.get('/runs/:id', wrap((req, res) => res.json(mustGet('runs', idParam(req)))));
 router.delete('/runs/:id', wrap((req, res) => {
@@ -258,7 +258,7 @@ router.post('/runs/:id/cancel', wrap((req, res) => {
 router.post('/runs/:id/rerun', wrap((req, res) => {
   const run = mustGet('runs', idParam(req));
   if (!run.suite_id) throw httpError(409, 'The suite for this run was deleted');
-  res.status(202).json({ runId: runQueue.enqueue(run.suite_id, 'rerun') });
+  res.status(202).json({ runId: runQueue.enqueue(run.suite_id, 'rerun', req.user?.email || null) });
 }));
 router.get('/runs/:id/results', wrap((req, res) => {
   const id = idParam(req);

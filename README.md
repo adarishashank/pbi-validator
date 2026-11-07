@@ -25,6 +25,23 @@ Each interaction runs in **lock-step** on both reports, then the page is restore
 
 Run status: **passed**, **diffs** (only visual/data differences), **failed** (fail/missing/error present), **error**, or **cancelled**.
 
+## Accounts, sign-in & admin panel
+
+| Feature | Details |
+|---|---|
+| **Sign in with Microsoft** | Microsoft Entra ID single sign-on (OpenID Connect + PKCE; ID-token signature, issuer, audience, nonce and tenant verified). MFA and conditional access apply. Restrict by tenant and email domain; auto-create accounts with a default role, or invite-only. |
+| **Email + password** | scrypt-hashed passwords, minimum length and common-password checks, one-time passwords for new users and resets (must be changed at first sign-in), sign-in throttling. Can be turned off to require Microsoft. |
+| **Roles** | **Viewer**: read everything, export, ask AI. **Editor**: also manage report links, suites, auth profiles and run validations. **Admin**: also users, sign-in settings, audit log. Enforced by the server on every request; viewers don't see edit buttons. |
+| **Admin panel** | *Users* (add, change role, disable, reset password, sign out everywhere, delete, with last-admin protection) · *Sign-in* (Microsoft setup guide with the exact redirect URI, connection test, password sign-in toggle, public URL) · *Audit log* (every sign-in, failure and change, with user, IP and result; filterable) · *System* (health, storage, sessions, AI status). |
+| **My account** | Change password, see and sign out other devices, create personal **API keys** (`Authorization: Bearer pbiv_…`) for CI with an expiry. |
+| **Security** | HttpOnly SameSite session cookies (Secure over HTTPS), idle and absolute session expiry, origin checks on all writes, HSTS behind HTTPS, private caching for screenshots, secrets never returned or logged. |
+
+**First run:** open `http://127.0.0.1:4400` *on the machine running the validator* to create the first administrator (or `npm run cli -- create-admin you@company.com`). From another machine, the setup page asks for the `API_TOKEN` as a setup token.
+
+**Microsoft sign-in setup:** Admin → Sign-in shows a step-by-step guide. In short: register an app in the [Entra admin center](https://entra.microsoft.com) (single tenant, *Web* redirect URI shown on the page), then paste the client ID, tenant ID and a client secret. If you serve the app through Cloudflare or a custom domain, set **Public URL** first so the redirect URI matches.
+
+CLI: `npm run cli -- users`, `create-admin <email>`, `reset-password <email>`. The `API_TOKEN` still works as an admin Bearer token for scripts.
+
 ## AI analysis (NVIDIA open models)
 
 With a free [NVIDIA API key](https://build.nvidia.com) in `.env` (`NVIDIA_API_KEY=nvapi-…`), every finished run is analysed automatically:
@@ -83,10 +100,10 @@ The validator needs a real browser, disk storage and a sign-in window, so it run
 | Keep it running on this Mac | `./scripts/macos/install-service.sh` + `sudo cloudflared service install` | starts at login, restarts on crash |
 | Cloud VM | `docker compose up -d` (see `docker-compose.yml`) | app + cloudflared containers; sign in on a workstation and **Import** the session |
 
-Always set `API_TOKEN` and/or a Cloudflare Access policy before exposing the app: it holds Power BI sessions.
+Create the administrator account (locally) and set `API_TOKEN` before exposing the app: it holds Power BI sessions. For Microsoft sign-in through the tunnel, set **Public URL** (Admin → Sign-in) to the tunnel address and register that redirect URI in Entra; a permanent named tunnel avoids re-registering. Cloudflare Access can be added in front as a second layer.
 
 ## Production deployment
-* **Configuration**: `.env` (see `.env.example`). Binds to `127.0.0.1` by default. If you expose it, set `API_TOKEN`; the UI then asks for it once and stores an HttpOnly cookie, and CI can send `Authorization: Bearer <token>`.
+* **Configuration**: `.env` (see `.env.example`). Binds to `127.0.0.1` by default. Everyone signs in with their own account (see *Accounts*); CI uses a personal API key or `API_TOKEN` as `Authorization: Bearer <token>`.
 * **Docker**: `docker build -t pbi-validator . && docker run -p 4400:4400 -v pbi-data:/data -e API_TOKEN=… pbi-validator`. Containers have no display, so sign in on a workstation (`npm run login -- "<profile>"`) and use **Import** on the Auth profiles page.
 * **Data**: SQLite (WAL) plus PNG artifacts in `DATA_DIR`. Runs older than `RUN_RETENTION_DAYS` are purged nightly. Session files are written with `0600` permissions and refreshed after each successful run. Treat `DATA_DIR/auth` as a secret.
 * **Robustness**: runs are snapshotted (later edits don't change history), queued (`MAX_PARALLEL_RUNS`), cancellable, and marked as interrupted if the server restarts. Sessions that hit the Microsoft login page fail fast with a clear "sign in again" message, and the profile is flagged.
@@ -103,8 +120,8 @@ npm run dev       # auto-restart on changes
 src/engine/   pbi.js (report driver) · runner.js (scenarios) · compare.js (pixel + data diff)
               matcher.js (page/visual matching) · inpage.js (in-browser extraction) · selectors.js
 src/jobs/     queue.js · scheduler.js · discovery.js · export.js (HTML/JUnit/JSON)
-src/auth/     profiles.js (interactive sign-in, session check/import)
-src/api/      routes.js (REST + SSE)       public/   Preact + htm UI (no build step)
+src/auth/     profiles.js (Power BI sessions) · users.js · passwords.js · microsoft.js (Entra OIDC) · middleware.js (roles, CSRF, audit)
+src/api/      routes.js (REST + SSE) · auth.js · admin.js      public/   Preact + htm UI (no build step)
 ```
 
 ## Known limits

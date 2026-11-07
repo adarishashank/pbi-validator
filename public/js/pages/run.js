@@ -181,12 +181,12 @@ export function RunDetail({ id }) {
 
   let lastPage = null;
   return html`
-    <${Topbar} title=${html`Run #${run.id} · ${run.suite_name}`} sub=${html`<span class="row" style="gap:8px"><${Badge} s=${run.status} /><span>${run.trigger}</span><span>· started ${fmtDate(run.started_at || run.queued_at)}</span><span>· ${runDuration(run)}</span></span>`}>
-      ${live && html`<button class="btn danger" onClick=${cancel}>Cancel</button>`}
-      ${!live && run.suite_id && html`<button class="btn" onClick=${rerun}>↻ Re-run</button>`}
+    <${Topbar} title=${html`Run #${run.id} · ${run.suite_name}`} sub=${html`<span class="row" style="gap:8px"><${Badge} s=${run.status} /><span>${run.trigger}${run.triggered_by ? ` by ${run.triggered_by}` : ''}</span><span>· started ${fmtDate(run.started_at || run.queued_at)}</span><span>· ${runDuration(run)}</span></span>`}>
+      ${live && html`<button class="btn ed danger" onClick=${cancel}>Cancel</button>`}
+      ${!live && run.suite_id && html`<button class="btn ed" onClick=${rerun}>↻ Re-run</button>`}
       ${!live && html`<a class="btn" href=${`/api/runs/${id}/export.zip`}>⇩ HTML report (.zip)</a>
         <a class="btn ghost" href=${`/api/runs/${id}/junit.xml`}>JUnit</a><a class="btn ghost" href=${`/api/runs/${id}/export.json`}>JSON</a>
-        <button class="btn ghost danger" onClick=${del}>Delete</button>`}
+        <button class="btn ed ghost danger" onClick=${del}>Delete</button>`}
     </${Topbar}>
     <div class="content stack">
       <div class="panel panel-b stack" style="gap:10px">

@@ -7,7 +7,8 @@ export { h, render, useState, useEffect, useRef, useCallback, useMemo };
 
 // ------------------------------------------------------------------ store
 const listeners = new Set();
-export const store = { toasts: [], modal: null, lightbox: null, tokenPrompt: false };
+// me: undefined = still loading, null = signed out, else { user, method, roles, roleInfo }
+export const store = { toasts: [], modal: null, lightbox: null, me: undefined, authConfig: null };
 export function setStore(patch) {
   Object.assign(store, typeof patch === 'function' ? patch(store) : patch);
   listeners.forEach((l) => l());
@@ -34,14 +35,14 @@ export async function api(path, { method = 'GET', body, raw } = {}) {
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });
-  if (res.status === 401) {
-    const j = await res.json().catch(() => ({}));
-    if (j.tokenRequired) { setStore({ tokenPrompt: true }); throw new ApiError('Authentication required'); }
-  }
   if (raw) return res;
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(data?.error || `${res.status} ${res.statusText}`);
+  if (res.status === 401 && data?.loginRequired && store.me) setStore({ me: null, modal: null });
+  if (res.status === 403 && data?.passwordChangeRequired && store.me?.user) {
+    setStore({ me: { ...store.me, user: { ...store.me.user, must_change_password: true } }, modal: null });
+  }
+  if (!res.ok) throw Object.assign(new ApiError(data?.error || `${res.status} ${res.statusText}`), { status: res.status, data });
   return data;
 }
 
@@ -60,6 +61,31 @@ export function useApi(path, { poll = 0, deps = [] } = {}) {
     return () => clearInterval(t);
   }, [reload, poll]);
   return { ...state, reload };
+}
+
+// ------------------------------------------------------------------ auth
+const RANK = { viewer: 0, editor: 1, admin: 2 };
+/** True when the signed-in user has at least the given role. */
+export const can = (role) => Boolean(store.me?.user) && RANK[store.me.user.role] >= RANK[role];
+
+export async function loadSession() {
+  const [cfg, me] = await Promise.all([
+    api('/auth/config').catch(() => null),
+    api('/auth/me').catch(() => null),
+  ]);
+  const signedIn = me?.user ? me : null;
+  setStore({ authConfig: cfg, me: signedIn });
+  return signedIn;
+}
+
+export async function signOut() {
+  await api('/auth/logout', { method: 'POST' }).catch(() => {});
+  setStore({ me: null, modal: null });
+  go('/login');
+}
+
+export async function copyText(text, label = 'Copied') {
+  try { await navigator.clipboard.writeText(text); toast(label, 'ok'); } catch { toast('Copy failed: select the text and copy it manually', 'err'); }
 }
 
 // ---------------------------------------------------------------- router

@@ -27,7 +27,7 @@ export function Runs({ query }) {
         ${list.map((r) => html`<tr class="click" onClick=${() => go(`/runs/${r.id}`)}>
           <td><b>#${r.id}</b></td><td>${r.suite_name}</td>
           <td>${['running', 'queued'].includes(r.status) ? html`<div style="min-width:140px"><div class="row"><${Badge} s=${r.status} /><span class="small muted">${Math.round(r.progress * 100)}%</span></div><div style="margin-top:4px"><${Progress} value=${r.progress} sm /></div></div>` : html`<${Badge} s=${r.status} />`}</td>
-          <td><${SummaryChips} byStatus=${r.summary?.byStatus} /></td><td><span class="tag">${r.trigger}</span></td>
+          <td><${SummaryChips} byStatus=${r.summary?.byStatus} /></td><td><span class="tag">${r.trigger}</span>${r.triggered_by && html`<div class="small muted truncate" style="max-width:180px">${r.triggered_by}</div>`}</td>
           <td class="muted">${fmtDate(r.started_at || r.queued_at)}</td><td class="muted">${runDuration(r)}</td></tr>`)}
       </tbody></table></div>`}
     </div>`;

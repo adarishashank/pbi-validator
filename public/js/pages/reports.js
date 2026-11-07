@@ -75,7 +75,7 @@ export function Reports() {
 
   return html`
     <${Topbar} title="Report links" sub="Every Power BI report you want to validate. Pair two of them in a test suite to compare A ⇄ B.">
-      <button class="btn primary" onClick=${() => edit(null)}>+ Add report link</button>
+      <button class="btn ed primary" onClick=${() => edit(null)}>+ Add report link</button>
     </${Topbar}>
     <div class="content">
       ${list.length === 0 ? html`<div class="panel"><${Empty} title="No report links yet">Add the report you want to validate — typically two copies (e.g. DEV and PROD, or before/after a dataset change).</${Empty}></div>` : html`
@@ -91,11 +91,11 @@ export function Reports() {
               ? html`<span class="row" style="gap:6px"><${Badge} s="pass" label="OK" /><span class="small muted">${d.pages.length} pages · ${fmtAgo(d.at)}</span></span>`
               : html`<span class="row" style="gap:6px"><${Badge} s="fail" label="Failed" /><span class="small muted truncate" style="max-width:240px" title=${d.error}>${d.error}</span></span>`}</td>
             <td style="text-align:right"><div class="row" style="justify-content:flex-end">
-              <button class="btn sm" onClick=${() => discover(r)} disabled=${busy[r.id]}>${busy[r.id] ? html`<${Spinner} /> Discovering…` : 'Discover'}</button>
+              <button class="btn ed sm" onClick=${() => discover(r)} disabled=${busy[r.id]}>${busy[r.id] ? html`<${Spinner} /> Discovering…` : 'Discover'}</button>
               ${d && html`<button class="btn sm ghost" onClick=${() => setStore({ modal: html`<${Discovery} report=${r} result=${d} />` })}>View</button>`}
               <a class="btn sm ghost" href=${r.url} target="_blank" rel="noopener noreferrer">Open ↗</a>
-              <button class="btn sm ghost" onClick=${() => edit(r)}>Edit</button>
-              <button class="btn sm ghost danger" onClick=${() => del(r)}>Delete</button></div></td></tr>`;
+              <button class="btn ed sm ghost" onClick=${() => edit(r)}>Edit</button>
+              <button class="btn ed sm ghost danger" onClick=${() => del(r)}>Delete</button></div></td></tr>`;
         })}
       </tbody></table></div>`}
     </div>`;

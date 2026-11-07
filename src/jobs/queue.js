@@ -40,11 +40,11 @@ class RunQueue {
     this.active = new Map(); // runId -> AbortController
   }
 
-  enqueue(suiteId, trigger = 'manual') {
+  enqueue(suiteId, trigger = 'manual', triggeredBy = null) {
     const suite = q.get('SELECT * FROM suites WHERE id = ?', suiteId);
     if (!suite) throw Object.assign(new Error('Suite not found'), { status: 404 });
     const snapshot = buildSnapshot(suite);
-    const runId = insert('runs', { suite_id: suite.id, suite_name: suite.name, trigger, status: 'queued', snapshot, queued_at: nowIso() });
+    const runId = insert('runs', { suite_id: suite.id, suite_name: suite.name, trigger, triggered_by: triggeredBy, status: 'queued', snapshot, queued_at: nowIso() });
     this.pending.push(runId);
     bus.emit('run', { runId, status: 'queued' });
     logger.info(`Run #${runId} queued for suite "${suite.name}" (${trigger})`);

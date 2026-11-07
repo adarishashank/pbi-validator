@@ -1,12 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import express from 'express';
 import { pathToFileURL } from 'node:url';
 import { config, ROOT } from './config.js';
 import { recoverInterruptedRuns } from './db.js';
 import { createLogger } from './logger.js';
 import api from './api/routes.js';
+import adminApi from './api/admin.js';
+import { authApi, browserAuth } from './api/auth.js';
+import { authenticate, auditTrail } from './auth/middleware.js';
+import { userCount } from './auth/users.js';
 import { syncSchedules, startHousekeeping } from './jobs/scheduler.js';
 
 const logger = createLogger('server');
@@ -20,34 +23,23 @@ export function createApp() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'; object-src 'none'");
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
     next();
   });
 
-  // Optional shared-secret protection for API + artifacts.
-  if (config.apiToken) {
-    const expected = Buffer.from(config.apiToken);
-    const ok = (t) => t && t.length === expected.length && crypto.timingSafeEqual(Buffer.from(t), expected);
-    app.post('/auth/session', express.json(), (req, res) => {
-      if (!ok(String(req.body?.token || ''))) return res.status(401).json({ error: 'Invalid token' });
-      res.setHeader('Set-Cookie', `pbiv_token=${encodeURIComponent(config.apiToken)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000`);
-      res.json({ ok: true });
-    });
-    app.use(['/api', '/artifacts'], (req, res, next) => {
-      if (req.baseUrl === '/api' && req.path === '/health') return next();
-      const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-      const cookie = /(?:^|;\s*)pbiv_token=([^;]+)/.exec(req.headers.cookie || '')?.[1];
-      if (ok(bearer) || ok(cookie && decodeURIComponent(cookie))) return next();
-      res.status(401).json({ error: 'Authentication required', tokenRequired: true });
-    });
-  }
-
-  app.use('/api', express.json({ limit: '10mb' }), api);
+  // Every API call and screenshot requires a signed-in user (or API key /
+  // API_TOKEN). Roles are enforced per endpoint; writes are audited.
+  app.use(['/api', '/artifacts'], express.json({ limit: '10mb' }), authenticate);
+  app.use(browserAuth);
+  app.use('/api', auditTrail, authApi, adminApi, api);
 
   // Run artifacts (screenshots) and discovery thumbnails.
-  const artifactOpts = { immutable: true, maxAge: '7d', index: false, dotfiles: 'deny' };
+  // Screenshots are behind sign-in, so browsers may cache them only privately.
+  const artifactOpts = { immutable: true, maxAge: '7d', index: false, dotfiles: 'deny', setHeaders: (res) => res.setHeader('Cache-Control', 'private, max-age=604800, immutable') };
   app.use('/artifacts/runs', express.static(config.runsDir, artifactOpts));
-  app.use('/artifacts/discovery', express.static(config.discoveryDir, { ...artifactOpts, immutable: false, maxAge: 0 }));
+  app.use('/artifacts/discovery', express.static(config.discoveryDir, { ...artifactOpts, setHeaders: (res) => res.setHeader('Cache-Control', 'private, no-cache') }));
 
   // Front-end vendor modules (no build step). Bare "preact" imports are
   // rewritten so the browser can load them without an import map.
@@ -87,8 +79,8 @@ export function start() {
   const app = createApp();
   const server = app.listen(config.port, config.host, () => {
     logger.info(`Power BI Validator listening on http://${config.host}:${config.port}  (data: ${config.dataDir})`);
-    if (config.host !== '127.0.0.1' && config.host !== 'localhost' && !config.apiToken) {
-      logger.warn('Listening on a non-loopback interface without API_TOKEN — anyone on the network can drive this tool.');
+    if (userCount() === 0) {
+      logger.warn(`No users yet: open http://127.0.0.1:${config.port} on this machine to create the first administrator (or run: npm run cli -- create-admin you@company.com).`);
     }
   });
   const shutdown = (sig) => {

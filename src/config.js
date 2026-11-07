@@ -37,6 +37,20 @@ export const config = {
   runRetentionDays: int(process.env.RUN_RETENTION_DAYS, 30),
   loginUrl: process.env.PBI_LOGIN_URL || 'https://app.powerbi.com/home',
   logLevel: process.env.LOG_LEVEL || 'info',
+  // User accounts and sign-in. Microsoft Entra ID settings can also be set in
+  // Admin → Sign-in; environment variables take precedence and lock the field.
+  auth: {
+    publicUrl: (process.env.PUBLIC_URL || '').replace(/\/+$/, ''),
+    sessionIdleHours: int(process.env.SESSION_IDLE_HOURS, 72),
+    sessionMaxDays: int(process.env.SESSION_MAX_DAYS, 30),
+    passwordMinLength: Math.max(8, int(process.env.PASSWORD_MIN_LENGTH, 10)),
+    loginMaxAttempts: int(process.env.LOGIN_MAX_ATTEMPTS, 8),
+    msTenant: process.env.MS_TENANT_ID || '',
+    msClientId: process.env.MS_CLIENT_ID || '',
+    msClientSecret: process.env.MS_CLIENT_SECRET || '',
+    // Change for sovereign clouds, e.g. https://login.microsoftonline.us
+    msAuthorityHost: (process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com').replace(/\/+$/, ''),
+  },
   // AI analysis via any OpenAI-compatible endpoint. Defaults to NVIDIA's
   // hosted API catalog (build.nvidia.com) with open-weight models; point
   // AI_BASE_URL at a self-hosted NIM to keep screenshots/data in-house.

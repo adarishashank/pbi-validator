@@ -1,4 +1,4 @@
-import { html, useEffect, useState, useStore, setStore, api, toast, STATUS_LABEL } from './lib.js';
+import { html, useEffect, useStore, setStore, api, toast, copyText, STATUS_LABEL } from './lib.js';
 
 export const Badge = ({ s, label }) => html`<span class="badge b-${s}">${label || STATUS_LABEL[s] || String(s).replace(/_/g, ' ')}</span>`;
 
@@ -58,22 +58,9 @@ export function ModalHost() {
   return s.modal || null;
 }
 
-export function TokenPrompt() {
-  const s = useStore();
-  const [token, setToken] = useState('');
-  if (!s.tokenPrompt) return null;
-  const submit = async (e) => {
-    e.preventDefault();
-    const r = await fetch('/auth/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
-    if (r.ok) { setStore({ tokenPrompt: false }); location.reload(); } else toast('Invalid access token', 'err');
-  };
-  return html`<${Modal} title="Access token required">
-    <form onSubmit=${submit} class="stack">
-      <p class="muted" style="margin:0">This validator is protected with an <code>API_TOKEN</code>. Enter it to continue.</p>
-      <input type="password" autofocus value=${token} onInput=${(e) => setToken(e.target.value)} placeholder="Access token" />
-      <div class="row"><span class="spacer"></span><button class="btn primary">Unlock</button></div>
-    </form></${Modal}>`;
-}
+/** Read-only value with a copy button (one-time passwords, keys, redirect URIs). */
+export const CopyBox = ({ value, label = 'Copy' }) => html`<div class="copybox"><code>${value}</code>
+  <button type="button" class="btn sm" onClick=${() => copyText(value)}>${label}</button></div>`;
 
 /** Runs an async action with toast feedback; returns its result. */
 export async function act(fn, ok) {

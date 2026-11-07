@@ -57,7 +57,7 @@ export function AiInsights({ run, ai, onOpenRef, reload }) {
   return html`<div class="stack">
     <div class="row">
       <span class="muted small">Models: <code>${st.textModel}</code> · vision <code>${st.visionModel}</code> · ${st.provider}</span><span class="spacer"></span>
-      ${running ? html`<span class="row small"><${Spinner} /> Analysing…</span>` : html`<button class="btn sm" disabled=${live} onClick=${analyze}>${S ? '↻ Re-analyse' : '🤖 Analyse with AI'}</button>`}
+      ${running ? html`<span class="row small"><${Spinner} /> Analysing…</span>` : html`<button class="btn ed sm" disabled=${live} onClick=${analyze}>${S ? '↻ Re-analyse' : '🤖 Analyse with AI'}</button>`}
     </div>
     ${!S && !running && !ai.summary?.error && html`<div class="panel"><div class="empty"><h3>No AI analysis yet</h3>${live ? 'It starts automatically when the run finishes.' : 'Click “Analyse with AI” for an executive summary, root-cause triage, data-anomaly review and screenshot explanations.'}</div></div>`}
     ${ai.summary?.status === 'error' && html`<div class="callout err">AI summary failed: ${ai.summary.error}</div>`}
@@ -138,7 +138,7 @@ export function VisionPanel({ result, ai, onUpdated }) {
     <div class="row"><b>🤖 AI screenshot analysis</b>${c && html`<${Badge} s=${c.likelyNoise ? 'skipped' : SEV[c.severity] || 'diff'} label=${c.likelyNoise ? 'likely noise' : `${c.severity} · ${c.category}`} />`}
       <span class="spacer"></span>
       ${!ai.status.imagesAllowed ? html`<span class="small muted">Disabled (AI_ALLOW_IMAGES=false)</span>`
-        : html`<button class="btn sm" disabled=${busy} onClick=${explain}>${busy ? html`<${Spinner} /> Looking…` : c ? '↻ Re-explain' : 'Explain with AI'}</button>`}</div>
+        : html`<button class="btn ed sm" disabled=${busy} onClick=${explain}>${busy ? html`<${Spinner} /> Looking…` : c ? '↻ Re-explain' : 'Explain with AI'}</button>`}</div>
     ${v?.status === 'error' && html`<div class="small" style="color:var(--fail)">${v.error}</div>`}
     ${v?.status === 'running' && !busy && html`<div class="small muted"><${Spinner} /> Analysing…</div>`}
     ${c && html`<div>${c.whatChanged}</div>${c.details?.length > 0 && html`<ul style="margin:0;padding-left:20px">${c.details.map((d) => html`<li class="small">${d}</li>`)}</ul>`}

@@ -142,7 +142,7 @@ export function Suites() {
 
   return html`
     <${Topbar} title="Test suites" sub="A suite pairs report A with report B (or validates one report) and defines what to check.">
-      <button class="btn primary" onClick=${() => open(null)}>+ New suite</button>
+      <button class="btn ed primary" onClick=${() => open(null)}>+ New suite</button>
     </${Topbar}>
     <div class="content">
       ${list.length === 0 ? html`<div class="panel"><${Empty} title="No suites yet">Create a suite to compare two report links end-to-end.</${Empty}></div>` : html`
@@ -160,12 +160,12 @@ export function Suites() {
           </div>
           ${lr && html`<div class="row small"><a href=${`#/runs/${lr.id}`}>Last run #${lr.id}</a><span class="muted">${fmtAgo(lr.finished_at)}</span><${SummaryChips} byStatus=${lr.summary?.byStatus} /></div>`}
           <div class="row" style="margin-top:4px">
-            <button class="btn primary sm" onClick=${() => run(s)}>▶ Run now</button>
+            <button class="btn ed primary sm" onClick=${() => run(s)}>▶ Run now</button>
             <a class="btn sm" href=${`#/runs?suite=${s.id}`}>History</a>
-            <button class="btn sm ghost" onClick=${() => open(s)}>Edit</button>
-            <button class="btn sm ghost" onClick=${() => dup(s)}>Duplicate</button>
+            <button class="btn ed sm ghost" onClick=${() => open(s)}>Edit</button>
+            <button class="btn ed sm ghost" onClick=${() => dup(s)}>Duplicate</button>
             <span class="spacer"></span>
-            <button class="btn sm ghost danger" onClick=${() => del(s)}>Delete</button>
+            <button class="btn ed sm ghost danger" onClick=${() => del(s)}>Delete</button>
           </div></div>`;
       })}</div>`}
     </div>`;
