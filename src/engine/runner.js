@@ -260,7 +260,7 @@ const showSel = (l) => (l.length ? l.join(', ') : 'All');
  * the slicer. Returns what was applied (shown with the page render).
  */
 async function alignSelections(env) {
-  const { ctx, cfg, sel, sides, both, pageName, compare, state, base, refresh, record, ignoredTitle } = env;
+  const { ctx, cfg, sel, sides, S, both, pageName, compare, state, base, refresh, record, ignoredTitle } = env;
   const log = ctx.log;
   const params = (cfg.parameters || []).filter((p) => !p.page || anyMatch([p.page], pageName));
   const align = compare && cfg.scenarios.alignSelections;
@@ -343,6 +343,16 @@ async function alignSelections(env) {
   });
   await both(async (s) => { await s.report.waitStable(); base[s.name] = await s.report.screenshotCanvas(); });
   await refresh();
+  // Check that each side now really shows the values (a slicer can refuse a value).
+  for (const [key, w] of want) {
+    const p = state.byKey.get(key);
+    if (!p) continue;
+    for (const side of Object.keys(w.target)) {
+      if (missing[key]?.[side]) continue;
+      const now = await S[side].report.slicerSelection(side === 'A' ? p.a : p.b).catch(() => null);
+      if (now && !sameSet(now, w.target[side])) (missing[key] ||= {})[side] = [`(still shows ${showSel(now)})`];
+    }
+  }
   for (const [key, w] of want) {
     for (const [side, labels] of Object.entries(w.target)) if (!missing[key]?.[side]) pagePins[side].set(w.title.toLowerCase(), labels);
   }
@@ -355,7 +365,7 @@ async function alignSelections(env) {
     state.selected.set(key, now);
     const changed = Object.keys(w.target).filter((side) => !miss[side]);
     applied.push({ slicer: w.title, why: w.why, values: w.why === 'aligned' ? w.before.A : Object.values(w.target)[0], before: w.before, changed, missing: miss });
-    const missText = Object.entries(miss).map(([side, l]) => `${l.join(', ')} not available in ${side}`).join('; ');
+    const missText = Object.entries(miss).map(([side, l]) => (l[0]?.startsWith('(') ? `${side} could not be set ${l[0].replace(/^\(|\)$/g, '').replace(/^still/, '— it still')}` : `${l.join(', ')} not available in ${side}`)).join('; ');
     log('info', w.why === 'aligned'
       ? `Slicer "${w.title}": A shows ${showSel(w.before.A)}, B showed ${showSel(w.before.B)}${missText ? ` — ${missText}` : ' — B set to the same values before comparing'}`
       : `Parameter "${w.title}" = ${showSel(Object.values(w.target)[0])}${missText ? ` — ${missText}` : ''}`);
@@ -368,7 +378,7 @@ async function alignSelections(env) {
         images: { a: cropBuffer(orig.A, w.pair.a.box), b: cropBuffer(orig.B, w.pair.b.box) },
         details: {
           slicer: w.title, defaultA: w.before.A, defaultB: w.before.B, applied: !miss.B,
-          note: miss.B ? `B's slicer has no ${missText.replace(/ not available in B$/, '')}: the page was compared with different selections`
+          note: miss.B ? `${missText}: the rest of this page was compared with different selections`
             : `B was set to ${showSel(w.before.A)} before the page was compared, so the other checks on this page compare the same selection`,
         },
       });

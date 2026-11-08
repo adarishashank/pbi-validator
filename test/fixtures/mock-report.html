@@ -65,6 +65,14 @@ const MATRIX = [
   { name: 'Clothing', value: 80, kids: [['Jerseys', 50], ['Gloves', 30]] },
 ];
 // ?sel=South: the Region slicer opens on South (a published default selection).
+// ?dd=1 adds a single-select dropdown slicer "Business" like Power BI's: no clear
+// button, items load ~0.6 s after opening and only 3 rows render at a time
+// (scroll for more). ?biz=CFI sets its default value.
+const QS = new URLSearchParams(location.search);
+const DD = QS.has('dd');
+const BIZ = ['All', 'AUS', 'NZ', 'UK', 'US', 'CA', 'CFI', 'DE'];
+const BIZ_SALES = { AUS: 11, NZ: 7, UK: 9, US: 30, CA: 5, CFI: 23, DE: 4 };
+const dd = { biz: QS.get('biz') || 'All', open: false, ready: false, top: 0 };
 const st = { page: 0, region: new URLSearchParams(location.search).get('sel') || null, level: 0, drillRegion: null, drillCity: null, expanded: new Set(), through: null };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -128,6 +136,12 @@ function render() {
       header: `<button aria-label="Drill up" ${st.level === 0 ? 'disabled' : ''}>↑</button><button aria-label="Expand all down one level in the hierarchy" ${st.level >= 2 ? 'disabled' : ''}>⇊</button>` });
     html += vc({ type: 'actionButton', role: 'button', title: '', label: 'Go to Details . Click here to follow', x: 860, y: 20, w: 200, h: 60, body: '<div class="actionBtn" id="goDetails">Go to Details</div>' });
     html += vc({ type: 'textbox', role: 'Text box', title: '', x: 860, y: 120, w: 300, h: 60, body: `<p>Sales overview for FY26</p>` });
+    if (DD) {
+      html += vc({ type: 'slicer', role: 'Slicer', title: '', x: 20, y: 390, w: 300, h: 70,
+        body: `<div class="slicer-header"><h3 class="slicer-header-text" title="Business">Business</h3></div><div class="slicer-dropdown-menu" id="bizdd" style="border:1px solid #999;padding:4px;cursor:pointer">${dd.biz}</div>` });
+      html += vc({ type: 'card', role: 'Card', title: 'Business Sales', x: 360, y: 390, w: 300, h: 110,
+        body: `<div class="cardValue">${dd.biz === 'All' ? Object.values(BIZ_SALES).reduce((a, b) => a + b, 0) : BIZ_SALES[dd.biz]}</div>` });
+    }
   } else if (p === 'Details') {
     html += vc({ type: 'pivotTable', role: 'Matrix', title: 'Sales by Category', x: 20, y: 20, w: 400, h: 320, body: matrixBody() });
     if (!B) html += vc({ type: 'textbox', role: 'Text box', title: '', x: 460, y: 20, w: 300, h: 80, body: '<p>Notes: figures exclude returns</p>' });
@@ -137,8 +151,17 @@ function render() {
       body: `<svg width="580" height="250"><g class="series" role="listbox"><circle role="option" aria-label="Jan 10" cx="50" cy="200" r="5"></circle><circle role="option" aria-label="Feb 20" cx="150" cy="150" r="5"></circle></g></svg>` });
   }
   c.innerHTML = html;
+  renderPopup();
   document.getElementById('counter').innerHTML = `<span class="innerText">${st.page + 1}</span> <span class="innerText">of</span> <span class="innerText">${PAGES.length}</span>`;
   document.getElementById('pagelist').innerHTML = PAGES.map((n, i) => `<button class="sectionItem${i === st.page && !st.through ? ' selected' : ''}" aria-label="${n}" data-i="${i}">${n}</button>`).join('');
+}
+
+function renderPopup() {
+  let pop = document.getElementById('bizpop');
+  if (!dd.open || st.page !== 0) { if (pop) pop.remove(); return; }
+  if (!pop) { pop = document.createElement('div'); pop.id = 'bizpop'; document.body.appendChild(pop); }
+  Object.assign(pop.style, { position: 'absolute', left: '28px', top: '470px', width: '200px', background: '#fff', border: '1px solid #999', zIndex: 50 });
+  pop.innerHTML = dd.ready ? BIZ.slice(dd.top, dd.top + 3).map((b) => `<div class="slicerItemContainer" data-biz="${b}" title="${b}" aria-selected="${dd.biz === b}" style="padding:4px">${b}</div>`).join('') : '<div>Loading…</div>';
 }
 
 // Simulated asynchronous query + render, like a real report.
@@ -157,6 +180,10 @@ document.addEventListener('click', (e) => {
   if (t.closest('#next')) return st.page < PAGES.length - 1 && update(() => { st.page++; });
   if (t.closest('#prev')) return st.page > 0 && update(() => { st.page--; });
   if (t.closest('#goDetails')) return update(() => { st.page = B ? 2 : 1; });
+  if (t.closest('#bizdd')) { dd.open = !dd.open; dd.ready = false; dd.top = 0; renderPopup(); if (dd.open) setTimeout(() => { dd.ready = true; renderPopup(); }, 600); return; }
+  const bizItem = t.closest('[data-biz]');
+  if (bizItem) return update(() => { dd.biz = bizItem.dataset.biz; });
+  if (dd.open && !t.closest('#bizpop')) { dd.open = false; renderPopup(); }
   if (t.matches('.slicer-header-clear')) return update(() => { st.region = null; });
   const item = t.closest('.slicerItemContainer');
   if (item) return update(() => { st.region = item.title === 'Select all' ? null : item.title; });
@@ -182,7 +209,13 @@ function showSubmenu() {
   if (!m.querySelector('[data-act="dt"]')) m.insertAdjacentHTML('beforeend', '<div class="sub"><div role="menuitem" data-act="dt">Region detail</div></div>');
 }
 document.addEventListener('mouseover', (e) => { if (e.target.matches && e.target.matches('[data-act="dt-open"]')) showSubmenu(); });
+document.addEventListener('wheel', (e) => {
+  if (!e.target.closest || !e.target.closest('#bizpop') || !dd.ready) return;
+  dd.top = Math.max(0, Math.min(BIZ.length - 3, dd.top + (e.deltaY > 0 ? 1 : -1)));
+  renderPopup();
+});
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { dd.open = false; renderPopup(); }
   if (e.key === 'Escape') { document.getElementById('menu').style.display = 'none'; document.getElementById('pagelist').classList.remove('open'); }
 });
 document.addEventListener('mouseover', (e) => {

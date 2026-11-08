@@ -430,33 +430,55 @@ export class PbiReport {
         await this.dismissOverlays();
         await dd.click({ timeout: this.cfg.timing.actionTimeoutMs, force: true });
       });
-      await sleep(700);
       scope = this.frame.locator('body');
-      items = this.frame.locator(`${this.sel.slicerItem}:visible`);
+      items = this.popupItems();
+      if (!(await this.waitForItems(items)) && !this.popupInside && await this.frame.locator(`${this.sel.slicerItem}:visible`).count().catch(() => 0)) {
+        this.popupInside = true; // this report draws the list inside the visual
+        items = this.popupItems();
+      }
     }
     const labels = await items.evaluateAll((els) => els.map((e) => (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim()));
     return { labels, scope };
   }
 
   async selectSlicerItem(v, label) {
-    const { labels } = await this.slicerItems(v);
-    const idx = labels.findIndex((l) => norm(l) === norm(label));
-    if (idx < 0) {
-      await this.page.keyboard.press('Escape').catch(() => {});
+    const hit = await this.findSlicerItem(v, label);
+    if (!hit) {
+      await this.dismissOverlays();
       return false;
     }
-    const loc = v.slicer?.hasDropdown
-      ? this.frame.locator(`${this.sel.slicerItem}:visible`).nth(idx)
-      : this.frame.locator(this.sel.visualContainer).nth(v.domIndex).locator(this.sel.slicerItem).nth(idx);
-    await loc.click({ timeout: this.cfg.timing.actionTimeoutMs });
+    await hit.scope.nth(hit.idx).click({ timeout: this.cfg.timing.actionTimeoutMs });
     await sleep(300);
     if (v.slicer?.hasDropdown) await this.page.keyboard.press('Escape').catch(() => {});
     return true;
   }
 
   /**
+   * Items of an open dropdown slicer. Power BI draws the list outside the
+   * visual, so items inside visuals (list slicers on the same page) are left out.
+   */
+  popupItems() {
+    if (this.popupInside) return this.frame.locator(`${this.sel.slicerItem}:visible`);
+    return this.frame.locator(`${this.sel.slicerItem}:not(:is(${this.sel.visualContainer}) *):visible`);
+  }
+
+  /** Waits until a slicer list has rendered its items (they load after the list opens). */
+  async waitForItems(items, timeout = 6000) {
+    const end = Date.now() + timeout;
+    let last = -1;
+    while (Date.now() < end) {
+      const n = await items.count().catch(() => 0);
+      if (n > 0 && n === last) return n;
+      last = n;
+      await sleep(350);
+    }
+    return Math.max(0, last);
+  }
+
+  /**
    * The values selected in a slicer ([] = nothing selected / all). List slicers
-   * are read from the page; dropdown slicers are opened briefly.
+   * are read from their ticks; a dropdown from the text it shows ("CFI", "All"),
+   * and only opened when it says "Multiple selections".
    */
   async slicerSelection(v) {
     const pick = (items) => {
@@ -464,8 +486,10 @@ export class PbiReport {
       return items.filter((i) => i.checked && i.label && !/^select all$/i.test(i.label)).map((i) => i.label);
     };
     if (!v.slicer?.hasDropdown) return pick(v.slicer?.items || []);
+    const shown = dropdownText(v);
+    if (shown !== null) return shown;
     await this.openSlicerList(v);
-    const items = await this.frame.locator(`${this.sel.slicerItem}:visible`).evaluateAll((els) => els.map((e) => ({
+    const items = await this.popupItems().evaluateAll((els) => els.map((e) => ({
       label: (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim(),
       checked: e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true' || !!e.querySelector('[aria-checked="true"], [aria-selected="true"], .selected'),
     })));
@@ -476,8 +500,57 @@ export class PbiReport {
   /** Opens a dropdown slicer's list unless it is already open. */
   async openSlicerList(v) {
     if (!v.slicer?.hasDropdown) return;
-    if (await this.frame.locator(`${this.sel.slicerItem}:visible`).count().catch(() => 0)) return;
+    if (await this.popupItems().count().catch(() => 0)) return;
     await this.slicerItems(v);
+  }
+
+  /**
+   * Finds a value in a slicer's list. Long lists only render the rows in view,
+   * so it uses the slicer's search box when there is one, otherwise scrolls.
+   * Returns { scope, idx, checked } or null.
+   */
+  async findSlicerItem(v, label) {
+    await this.openSlicerList(v);
+    const scope = v.slicer?.hasDropdown
+      ? this.popupItems()
+      : this.frame.locator(this.sel.visualContainer).nth(v.domIndex).locator(this.sel.slicerItem);
+    await this.waitForItems(scope, 4000);
+    const look = async () => {
+      const info = await scope.evaluateAll((els) => els.map((e) => ({
+        label: (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim(),
+        checked: e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true',
+      })));
+      const idx = info.findIndex((i) => norm(i.label) === norm(label));
+      return idx < 0 ? null : { scope, idx, checked: info[idx].checked, labels: info.map((i) => i.label) };
+    };
+    let hit = await look();
+    if (hit) return hit;
+    const search = (v.slicer?.hasDropdown ? this.frame.locator(this.sel.slicerSearch).filter({ visible: true })
+      : this.frame.locator(this.sel.visualContainer).nth(v.domIndex).locator(this.sel.slicerSearch)).first();
+    if (await search.count().catch(() => 0)) {
+      await search.fill(label, { timeout: 5000 }).catch(() => {});
+      await sleep(900);
+      await this.waitForItems(scope, 3000);
+      hit = await look();
+      if (hit) return hit;
+      await search.fill('', { timeout: 5000 }).catch(() => {});
+      await sleep(600);
+    }
+    // Scroll through the list, looking at each screenful.
+    let prev = '';
+    for (let i = 0; i < 25; i++) {
+      const box = await scope.last().boundingBox().catch(() => null);
+      if (!box) break;
+      await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await this.page.mouse.wheel(0, Math.max(120, box.height * 4));
+      await sleep(350);
+      hit = await look();
+      if (hit) return hit;
+      const now = (await scope.evaluateAll((els) => els.map((e) => e.getAttribute('title') || e.textContent).join('|')).catch(() => ''));
+      if (now === prev) break; // end of the list
+      prev = now;
+    }
+    return null;
   }
 
   /**
@@ -491,18 +564,10 @@ export class PbiReport {
     const missing = [];
     let clicked = 0;
     for (const want of labels) {
-      await this.openSlicerList(v);
-      const scope = v.slicer?.hasDropdown
-        ? this.frame.locator(`${this.sel.slicerItem}:visible`)
-        : this.frame.locator(this.sel.visualContainer).nth(v.domIndex).locator(this.sel.slicerItem);
-      const info = await scope.evaluateAll((els) => els.map((e) => ({
-        label: (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim(),
-        checked: e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true',
-      })));
-      const idx = info.findIndex((i) => norm(i.label) === norm(want));
-      if (idx < 0) { missing.push(want); continue; }
-      if (info[idx].checked) { clicked++; continue; } // single-select slicers keep one value
-      await scope.nth(idx).click({ timeout: this.cfg.timing.actionTimeoutMs, modifiers: clicked ? ['ControlOrMeta'] : [] });
+      const hit = await this.findSlicerItem(v, want);
+      if (!hit) { missing.push(want); continue; }
+      if (hit.checked) { clicked++; continue; } // single-select slicers keep one value
+      await hit.scope.nth(hit.idx).click({ timeout: this.cfg.timing.actionTimeoutMs, modifiers: clicked ? ['ControlOrMeta'] : [] });
       clicked++;
       await sleep(300);
     }
@@ -529,6 +594,19 @@ export class PbiReport {
     }
     return done;
   }
+}
+
+/**
+ * What a dropdown slicer shows when closed: [] for "All", [value] for one value,
+ * null when it can't tell ("Multiple selections", nothing shown).
+ */
+export function dropdownText(v) {
+  const t = norm(v.title);
+  const shown = (v.lines || []).map((l) => l.replace(/\s+/g, ' ').trim()).filter((l) => l && norm(l) !== t);
+  if (shown.length !== 1) return null;
+  if (/^(all|select all|\(all\)|tout|alle|todos)$/i.test(shown[0])) return [];
+  if (/multiple selections|^\(?blank\)?$|selections?$/i.test(shown[0])) return null;
+  return [shown[0]];
 }
 
 export function redact(url) {

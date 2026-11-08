@@ -38,6 +38,7 @@ export const DEFAULT_SELECTORS = {
   slicerDropdown: '[data-testid="slicer-dropdown"], .slicer-dropdown-menu',
   slicerClear: '.slicer-header-clear, [aria-label="Clear selections"]',
   slicerHeader: '.slicer-header-text',
+  slicerSearch: 'input.searchInput, .searchHeader input, input[aria-label*="Search" i]',
   slicerRangeInputs: 'input.date-slicer-input, .date-slicer input, input[type="text"].sliderInput, .slider input',
   matrixExpander: '[role="grid"] [aria-expanded="false"], [role="treegrid"] [aria-expanded="false"], .expandCollapseButton[aria-expanded="false"]',
   contextMenuItem: '[role="menuitem"], [role="menuitemcheckbox"]',

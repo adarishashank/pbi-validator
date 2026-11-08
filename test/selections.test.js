@@ -95,3 +95,24 @@ test('fixed parameters are applied to both reports; a value one report lacks fai
   assert.equal(f?.status, 'fail', dump(bad.results));
   assert.match(f.title, /Parameter "Region" = Mars could not be set/);
 });
+
+test('a dropdown slicer whose list loads late and scrolls is read from its text and set by scrolling to the value', { timeout: 300_000 }, async () => {
+  const { results } = await run('dropdown', `${base}?v=a&dd=1&biz=CFI`, `${base}?v=a&dd=1&biz=AUS`, { scenarios: { slicers: false } });
+  const sel = results.filter((r) => r.scenario === 'selections');
+  assert.equal(sel.length, 1, dump(results));
+  assert.match(sel[0].title, /"Business" opens on different values: CFI \(A\) vs AUS \(B\)/);
+  assert.equal(sel[0].details.applied, true, JSON.stringify(sel[0].details));
+  // CFI is the 7th of 8 values and only 3 render at a time: B was scrolled to it.
+  const biz = results.find((r) => r.scenario === 'visual' && /Business Sales/.test(r.title));
+  assert.equal(biz.status, 'pass', dump(results));
+  assert.equal(results.find((r) => r.scenario === 'visual' && /Slicer · Business/.test(r.title)).status, 'pass', dump(results));
+});
+
+test('when B cannot be set, the finding says so instead of claiming the page was aligned', { timeout: 300_000 }, async () => {
+  // B's list has no "XX": a default only A can show.
+  const { results } = await run('cannot align', `${base}?v=a&dd=1&biz=XX`, `${base}?v=a&dd=1&biz=AUS`, { scenarios: { slicers: false } });
+  const sel = results.find((r) => r.scenario === 'selections');
+  assert.ok(sel, dump(results));
+  assert.equal(sel.details.applied, false);
+  assert.match(sel.details.note, /XX not available in B: the rest of this page was compared with different selections/);
+});
