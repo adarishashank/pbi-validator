@@ -4,6 +4,7 @@
 #
 #   ./deploy/cloudflare/deploy.sh            first deploy (asks for R2 keys) and later updates
 #   ./deploy/cloudflare/deploy.sh --seed     also copy this Mac's data/ (accounts, reports, runs) to Cloudflare
+#   ./deploy/cloudflare/deploy.sh --seed-only  only copy the data to R2 (when GitHub Actions does the deploys)
 #
 # R2 keys can also come from the environment (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)
 # or from deploy/cloudflare/.r2-credentials (two lines: KEY=VALUE, never committed).
@@ -11,7 +12,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 HERE="$(pwd)"; ROOT="$(cd ../.. && pwd)"
 BUCKET="pbireporttest-data"
-SEED=""; [ "${1:-}" = "--seed" ] && SEED=1
+SEED=""; SEED_ONLY=""
+case "${1:-}" in --seed) SEED=1 ;; --seed-only) SEED=1; SEED_ONLY=1 ;; esac
 
 say()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✔\033[0m %s\n' "$*"; }
@@ -66,7 +68,7 @@ if ! has R2_SECRET_ACCESS_KEY || [ -n "${R2_SECRET_ACCESS_KEY:-}" ]; then
   add_secret R2_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
 fi
 if ! has API_TOKEN; then
-  API_TOKEN="$(openssl rand -hex 24)"
+  API_TOKEN="$(cat "$HERE/.api-token" 2>/dev/null || openssl rand -hex 24)"
   add_secret API_TOKEN "$API_TOKEN"
   umask 077; echo "$API_TOKEN" > "$HERE/.api-token"; umask 022
 fi
@@ -97,6 +99,7 @@ if [ -n "$SEED" ]; then
   ok "Accounts, report links, suites, runs and Power BI sign-ins uploaded"
   warn "If the app is already running on Cloudflare it keeps its own copy until it next restarts."
 fi
+[ -n "$SEED_ONLY" ] && { ok "Done (data only). The app picks it up on its next start."; exit 0; }
 
 # ------------------------------------------------------------------- deploy
 say "Building and deploying (the first build takes several minutes)"

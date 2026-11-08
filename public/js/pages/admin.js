@@ -2,6 +2,7 @@ import { html, useState, useEffect, useStore, useApi, api, setStore, go, fmtAgo,
 import { Modal, Field, Check, act, confirmDialog, CopyBox, Empty, Spinner } from '../ui.js';
 import { Topbar } from './common.js';
 import { RoleBadge, SessionsTable } from './account.js';
+import { ResultsSiteSettings } from './publish.js';
 
 const TABS = [['users', 'Users'], ['settings', 'Settings'], ['audit', 'Audit log'], ['system', 'System']];
 const fmtBytes = (b) => (b == null ? '—' : b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`);
@@ -191,6 +192,7 @@ function Settings() {
         <dt>New users</dt><dd>Added by an administrator in Users. A temporary password is generated automatically, valid for ${st.tempPasswordHours} hours, and replaced by the user at first sign-in <span class="muted small">(TEMP_PASSWORD_HOURS)</span></dd>
         <dt>Locked out?</dt><dd>On the server: <code>npm run cli -- reset-password you@company.com</code></dd>
       </dl>`}</div></div>
+    <${ResultsSiteSettings} />
   </div>`;
 }
 

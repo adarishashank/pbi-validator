@@ -9,6 +9,7 @@ import { discoverReport } from '../jobs/discovery.js';
 import { loadRunBundle, junitXml, streamHtmlZip } from '../jobs/export.js';
 import { runSheets, runsListSheets, renderRunPdf } from '../jobs/report.js';
 import { xlsxBuffer } from '../jobs/xlsx.js';
+import { pagesStatus, publishRun, unpublishRun } from '../jobs/pages.js';
 import { SuiteConfigSchema, DEFAULT_SUITE_CONFIG } from '../engine/options.js';
 import { DEFAULT_SELECTORS } from '../engine/selectors.js';
 import { aiStatus } from '../ai/client.js';
@@ -314,6 +315,25 @@ router.get('/runs/:id/report.pdf', wrap(async (req, res) => {
   res.type('application/pdf').setHeader('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="pbireporttest-run-${b.run.id}.pdf"`);
   res.setHeader('Cache-Control', 'private, no-store');
   res.send(pdf);
+}));
+// ------------------------------------------------ results site (Cloudflare Pages)
+// Publishing builds the PDF/Excel and uploads in the background; poll /pages/status.
+const background = (p) => p.catch(() => { /* error is kept in pages status (lastError) */ });
+router.get('/pages/status', (req, res) => res.json(pagesStatus()));
+router.post('/runs/:id/publish', wrap((req, res) => {
+  const run = mustGet('runs', idParam(req));
+  if (['queued', 'running'].includes(run.status)) throw httpError(409, 'Wait for the run to finish before publishing it');
+  if (pagesStatus().deploying) throw httpError(409, 'The results site is being updated; try again in a minute');
+  res.locals.auditTarget = `run #${run.id} (${run.suite_name})`;
+  background(publishRun(run.id));
+  res.status(202).json(pagesStatus());
+}));
+router.delete('/runs/:id/publish', wrap((req, res) => {
+  const run = mustGet('runs', idParam(req));
+  if (pagesStatus().deploying) throw httpError(409, 'The results site is being updated; try again in a minute');
+  res.locals.auditTarget = `run #${run.id} (${run.suite_name})`;
+  background(unpublishRun(run.id));
+  res.status(202).json(pagesStatus());
 }));
 router.get('/runs/:id/export.zip', wrap((req, res) => {
   const b = loadRunBundle(idParam(req));

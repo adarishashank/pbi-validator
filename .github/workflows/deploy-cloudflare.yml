@@ -1,0 +1,117 @@
+# Deploys PBI Report Test to Cloudflare (Worker + Container + R2) after the
+# tests pass on main, or on demand (Actions → Deploy to Cloudflare → Run workflow).
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   account API token, "Edit Cloudflare Workers" template
+#   CLOUDFLARE_ACCOUNT_ID  your Cloudflare account ID
+#   R2_ACCESS_KEY_ID       R2 API token (Object Read & Write on pbireporttest-data)
+#   R2_SECRET_ACCESS_KEY
+#   APP_API_TOKEN          admin Bearer token / first-run setup token for the app
+#   NVIDIA_API_KEY         optional, enables AI analysis
+# Until the Cloudflare and R2 secrets exist, the workflow skips with a notice.
+name: Deploy to Cloudflare
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cloudflare
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: cloudflare
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      APP_API_TOKEN: ${{ secrets.APP_API_TOKEN }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - name: Check configuration
+        id: check
+        run: |
+          missing=()
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY APP_API_TOKEN; do
+            [ -n "${!v}" ] || missing+=("$v")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::notice title=Cloudflare deploy skipped::Add these repository secrets to enable deploys: ${missing[*]} (see deploy/cloudflare/README.md)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: deploy/cloudflare/package-lock.json
+
+      - name: Install Wrangler
+        if: steps.check.outputs.ready == 'true'
+        working-directory: deploy/cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: Make sure the R2 bucket exists
+        if: steps.check.outputs.ready == 'true'
+        working-directory: deploy/cloudflare
+        run: |
+          if ! out="$(npx wrangler r2 bucket list 2>&1)"; then
+            echo "$out"
+            grep -q 10042 <<<"$out" && echo "::error::R2 is not enabled on this Cloudflare account (dashboard → R2 Object Storage)."
+            exit 1
+          fi
+          grep -qw pbireporttest-data <<<"$out" || npx wrangler r2 bucket create pbireporttest-data
+
+      - name: Deploy
+        id: deploy
+        if: steps.check.outputs.ready == 'true'
+        working-directory: deploy/cloudflare
+        run: |
+          umask 077
+          node -e '
+            const s = { R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+              R2_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID, API_TOKEN: process.env.APP_API_TOKEN };
+            if (process.env.NVIDIA_API_KEY) s.NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+            require("fs").writeFileSync(process.env.RUNNER_TEMP + "/secrets.json", JSON.stringify(s));'
+          npx wrangler deploy --secrets-file "$RUNNER_TEMP/secrets.json" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          rm -f "$RUNNER_TEMP/secrets.json"
+          url="$(grep -oE 'https://pbireporttest\.[a-z0-9-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test
+        if: steps.check.outputs.ready == 'true' && steps.deploy.outputs.url != ''
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # The first start after a deploy pulls the image and restores data from R2.
+          for i in $(seq 1 40); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/health" || true)"
+            echo "attempt $i: HTTP $code"
+            [ "$code" = 200 ] && break
+            sleep 15
+          done
+          [ "$code" = 200 ] || { echo "::error::$URL did not become healthy"; exit 1; }
+          curl -fsS "$URL/api/auth/config"; echo
+          [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/runs")" = 401 ] || { echo "::error::API is not protected"; exit 1; }
+          echo "### Deployed: $URL" >> "$GITHUB_STEP_SUMMARY"

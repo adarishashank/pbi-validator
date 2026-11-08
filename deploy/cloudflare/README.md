@@ -43,6 +43,22 @@ R2_ACCESS_KEY_ID=...
 R2_SECRET_ACCESS_KEY=...
 ```
 
+## Automatic deploys from GitHub
+`.github/workflows/deploy-cloudflare.yml` deploys every push to `main` once the
+tests pass (and on demand: *Actions → Deploy to Cloudflare → Run workflow*).
+Add these repository secrets (*Settings → Secrets and variables → Actions*):
+
+| Secret | Where it comes from |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare → *My Profile → API Tokens → Create Token* → template **Edit Cloudflare Workers** (account-scoped) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare → *Workers & Pages* → Account details |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | the R2 API token from step 3 above |
+| `APP_API_TOKEN` | any long random string (admin Bearer token and first-run setup token) |
+| `NVIDIA_API_KEY` | optional, enables AI analysis |
+
+Until they're all set the workflow skips with a notice. To start with your
+existing accounts and runs, copy them once: `./deploy/cloudflare/deploy.sh --seed-only`.
+
 ## First sign-in
 - With `--seed`: sign in with your existing account.
 - Without: open the address and create the administrator. You'll be asked for

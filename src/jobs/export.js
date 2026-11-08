@@ -80,7 +80,8 @@ export function streamHtmlZip(bundle, res) {
   zip.finalize();
 }
 
-export function renderHtml(data) {
+/** Standalone interactive report. `topBar` is optional extra HTML shown above the header (published results site). */
+export function renderHtml(data, { topBar = '' } = {}) {
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -102,7 +103,7 @@ td{border-top:1px solid var(--line);padding:2px 6px;vertical-align:top;white-spa
 details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:6px}pre{white-space:pre-wrap;font-size:12px;background:#f6f8fa;padding:8px;border-radius:6px}
 #lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:9;cursor:zoom-out}#lb img{max-width:96vw;max-height:94vh;background:#fff}
 </style></head><body>
-<header><h1>${xmlEsc(data.run.suite_name)} — run #${data.run.id}</h1><div class="sub" id="sub"></div></header>
+${topBar}<header><h1>${xmlEsc(data.run.suite_name)} — run #${data.run.id}</h1><div class="sub" id="sub"></div></header>
 <main><div class="chips" id="chips"></div>
 <div id="ai"></div>
 <div class="filters"><select id="fs"><option value="">All statuses</option></select><select id="fc"><option value="">All scenarios</option></select><select id="fp"><option value="">All pages</option></select><input id="fq" placeholder="Search…"></div>

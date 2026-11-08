@@ -2,6 +2,7 @@ import { html, useState, useEffect, useMemo, useRef, useCallback, api, go, downl
 import { Badge, Progress, Modal, Menu, act, confirmDialog, zoom, Spinner } from '../ui.js';
 import { Topbar } from './common.js';
 import { AiInsights, AiChat, VisionPanel } from './ai.js';
+import { PublishControl } from './publish.js';
 
 const PROBLEM = new Set(['fail', 'error', 'missing', 'diff', 'warn']);
 const img = (runId, f) => `/artifacts/runs/${runId}/${f}`;
@@ -204,6 +205,7 @@ export function RunDetail({ id }) {
       ${!live && run.suite_id && html`<button class="btn ed" onClick=${rerun}>↻ Re-run</button>`}
       ${!live && html`<button class="btn primary" onClick=${() => exportRun(id, 'pdf')}>⇩ Download PDF</button>
         <${Menu} label="Export" items=${exportItems(id)} />
+        <${PublishControl} run=${run} />
         <button class="btn ed ghost danger" onClick=${del}>Delete</button>`}
     </${Topbar}>
     <div class="content stack">

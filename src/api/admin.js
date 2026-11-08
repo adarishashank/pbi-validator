@@ -12,6 +12,7 @@ import {
   otherActiveAdmins, authSettings, saveAuthSettings, inviteUser, issueTemporaryPassword,
 } from '../auth/users.js';
 import { publicOrigin } from '../auth/middleware.js';
+import { pagesStatus, deploySite, setSitePassword, setPagesProject } from '../jobs/pages.js';
 
 const router = express.Router();
 const httpError = (status, message) => Object.assign(new Error(message), { status });
@@ -136,6 +137,28 @@ router.put('/admin/settings', wrap((req, res) => {
   saveAuthSettings(d);
   res.locals.auditDetail = { changed: Object.keys(d) };
   res.json(settingsOut());
+}));
+
+// ------------------------------------------------- results site (Cloudflare Pages)
+const PagesSchema = z.object({
+  project: z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9-]{0,56}$/, 'Use lowercase letters, digits and dashes').optional(),
+  password: z.string().max(200).optional(),
+  removePassword: z.boolean().optional(),
+});
+router.put('/admin/pages', wrap((req, res) => {
+  const d = parse(PagesSchema, req.body);
+  if (pagesStatus().deploying) throw httpError(409, 'The results site is being updated; try again in a minute');
+  if (d.password !== undefined && d.password !== '' && d.password.length < 8) throw httpError(400, 'Use at least 8 characters for the site password');
+  if (d.project && d.project !== pagesStatus().project) setPagesProject(d.project);
+  res.locals.auditDetail = { project: d.project, password: d.password ? 'set' : d.removePassword ? 'removed' : undefined };
+  const job = d.password ? setSitePassword(d.password) : d.removePassword ? setSitePassword('') : deploySite('settings changed');
+  job.catch(() => {});
+  res.status(202).json(pagesStatus());
+}));
+router.post('/admin/pages/deploy', wrap((req, res) => {
+  if (pagesStatus().deploying) throw httpError(409, 'Already updating');
+  deploySite('republish').catch(() => {});
+  res.status(202).json(pagesStatus());
 }));
 
 // ------------------------------------------------------------------ audit

@@ -111,6 +111,8 @@ const ACTIONS = [
   ['POST', /^\/admin\/users$/, 'user.create'], ['PUT', /^\/admin\/users\/(\d+)$/, 'user.update'], ['DELETE', /^\/admin\/users\/(\d+)$/, 'user.delete'],
   ['POST', /^\/admin\/users\/(\d+)\/reset-password$/, 'user.reset_password'], ['DELETE', /^\/admin\/users\/(\d+)\/sessions$/, 'user.revoke_sessions'],
   ['PUT', /^\/admin\/settings$/, 'settings.update'],
+  ['POST', /^\/runs\/(\d+)\/publish$/, 'run.publish'], ['DELETE', /^\/runs\/(\d+)\/publish$/, 'run.unpublish'],
+  ['PUT', /^\/admin\/pages$/, 'pages.settings'], ['POST', /^\/admin\/pages\/deploy$/, 'pages.deploy'],
   ['POST', /^\/auth\/password$/, 'account.change_password'], ['POST', /^\/auth\/api-keys$/, 'account.create_api_key'],
   ['DELETE', /^\/auth\/api-keys\/(\d+)$/, 'account.delete_api_key'], ['DELETE', /^\/auth\/sessions(?:\/([\w-]+))?$/, 'account.revoke_sessions'],
 ];
