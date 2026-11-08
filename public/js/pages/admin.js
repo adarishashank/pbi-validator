@@ -1,9 +1,9 @@
-import { html, useState, useEffect, useStore, useApi, api, setStore, go, fmtAgo, fmtDate, toast } from '../lib.js';
+import { html, useState, useEffect, useStore, useApi, api, setStore, go, fmtAgo, fmtDate, toast, copyText } from '../lib.js';
 import { Modal, Field, Check, act, confirmDialog, CopyBox, Empty, Spinner } from '../ui.js';
 import { Topbar } from './common.js';
 import { RoleBadge, SessionsTable } from './account.js';
 
-const TABS = [['users', 'Users'], ['sign-in', 'Sign-in'], ['audit', 'Audit log'], ['system', 'System']];
+const TABS = [['users', 'Users'], ['settings', 'Settings'], ['audit', 'Audit log'], ['system', 'System']];
 const fmtBytes = (b) => (b == null ? '—' : b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1073741824).toFixed(2)} GB`);
 const fmtUptime = (s) => (s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`);
 
@@ -14,38 +14,57 @@ function RolePicker({ value, onChange, roleInfo }) {
       <div><b style="text-transform:capitalize">${r}</b><span>${roleInfo?.[r]}</span></div></label>`)}</div>`;
 }
 
-function TempPasswordModal({ title, email, password }) {
-  return html`<${Modal} title=${title} onClose=${() => setStore({ modal: null })} footer=${html`<button class="btn primary" onClick=${() => setStore({ modal: null })}>Done</button>`}>
+/** Plain-text sign-in instructions an admin can paste into an email or chat. */
+export function inviteText({ user, tempPassword, expiresAt, signInUrl }, reset = false) {
+  return [
+    `Hi${user.name ? ` ${user.name.split(' ')[0]}` : ''},`,
+    '',
+    reset ? 'Your PBI Validator password has been reset.' : 'An account has been created for you on PBI Validator (Power BI report testing).',
+    '',
+    `Sign in at:          ${signInUrl}`,
+    `Email:               ${user.email}`,
+    `Temporary password:  ${tempPassword}`,
+    '',
+    `The temporary password works until ${fmtDate(expiresAt)}. You'll be asked to choose your own password when you sign in.`,
+  ].join('\n');
+}
+
+function TempPasswordModal({ result, reset }) {
+  const close = () => setStore({ modal: null });
+  const text = inviteText(result, reset);
+  return html`<${Modal} title=${reset ? 'New temporary password' : 'User added'} onClose=${close}
+    footer=${html`<button class="btn" onClick=${() => copyText(text, 'Sign-in instructions copied')}>Copy sign-in instructions</button><button class="btn primary" onClick=${close}>Done</button>`}>
     <div class="stack">
-      <p style="margin:0">Give this one-time password to <b>${email}</b> through a trusted channel. They'll choose their own password when they first sign in.</p>
-      <${CopyBox} value=${password} />
-      <p class="small muted" style="margin:0">Sign-in page: <code>${location.origin}</code>. This password won't be shown again.</p>
+      <div class="callout ok">✔ <div>${reset ? html`A new temporary password was generated for <b>${result.user.email}</b>. Their old password no longer works and they were signed out everywhere.`
+        : html`<b>${result.user.email}</b> can now sign in as ${result.user.role === 'admin' ? 'an' : 'a'} <b>${result.user.role}</b>.`}</div></div>
+      <div><div class="small muted" style="margin-bottom:6px">Temporary password (generated automatically)</div><${CopyBox} value=${result.tempPassword} /></div>
+      <dl class="kv">
+        <dt>Sign-in page</dt><dd class="mono">${result.signInUrl}</dd>
+        <dt>Expires</dt><dd>${fmtDate(result.expiresAt)} <span class="muted small">(${result.validHours} hours)</span></dd>
+        <dt>First sign-in</dt><dd>They must choose their own password</dd>
+      </dl>
+      <details><summary class="small muted">Preview the sign-in instructions</summary><pre class="json" style="white-space:pre-wrap">${text}</pre></details>
+      <div class="callout warn small">⚠ <div>Share it through a trusted channel (Teams chat, phone). It is shown only now; if it's lost, generate a new one from Users.</div></div>
     </div></${Modal}>`;
 }
 
-function NewUserModal({ onDone, roleInfo, msEnabled }) {
-  const [f, setF] = useState({ email: '', name: '', role: 'viewer', provider: msEnabled ? 'microsoft' : 'local', password: '', setPw: false });
+function NewUserModal({ onDone, roleInfo }) {
+  const s = useStore();
+  const [f, setF] = useState({ email: '', name: '', role: 'viewer' });
+  const hours = s.authConfig?.tempPasswordHours || 72;
   const save = async () => {
-    const body = { email: f.email, name: f.name, role: f.role, provider: f.provider, password: f.provider === 'local' && f.setPw ? f.password : '' };
-    const r = await act(() => api('/admin/users', { method: 'POST', body }), `${f.email} added`);
+    const r = await act(() => api('/admin/users', { method: 'POST', body: f }), `${f.email} added`);
     if (!r) return;
     onDone();
-    if (r.tempPassword) setStore({ modal: html`<${TempPasswordModal} title="User added" email=${r.user.email} password=${r.tempPassword} />` });
-    else setStore({ modal: null });
+    setStore({ modal: html`<${TempPasswordModal} result=${r} />` });
   };
   return html`<${Modal} title="Add user" onClose=${() => setStore({ modal: null })}
-    footer=${html`<button class="btn" onClick=${() => setStore({ modal: null })}>Cancel</button><button class="btn primary" disabled=${!f.email} onClick=${save}>Add user</button>`}>
+    footer=${html`<button class="btn" onClick=${() => setStore({ modal: null })}>Cancel</button><button class="btn primary" disabled=${!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim())} onClick=${save}>Add user and generate password</button>`}>
     <div class="form-grid">
-      <${Field} label="Work email"><input type="email" autofocus value=${f.email} onInput=${(e) => setF({ ...f, email: e.target.value })} placeholder="name@company.com" /></${Field}>
+      <${Field} label="Work email" hint="They sign in with this."><input type="email" autofocus value=${f.email} onInput=${(e) => setF({ ...f, email: e.target.value })} placeholder="name@company.com" /></${Field}>
       <${Field} label="Name" hint="Optional"><input type="text" value=${f.name} onInput=${(e) => setF({ ...f, name: e.target.value })} /></${Field}>
-      <${Field} label="Signs in with" full><div class="btn-group">
-        <button type="button" class="btn ${f.provider === 'microsoft' ? 'on' : ''}" onClick=${() => setF({ ...f, provider: 'microsoft' })}>Microsoft account</button>
-        <button type="button" class="btn ${f.provider === 'local' ? 'on' : ''}" onClick=${() => setF({ ...f, provider: 'local' })}>Email + password</button></div></${Field}>
-      ${f.provider === 'microsoft' && html`<div class="full callout info">ℹ <div>They'll sign in with “Sign in with Microsoft” using this email; their account is linked at first sign-in.${!msEnabled ? html` <b>Microsoft sign-in isn't set up yet</b>: see the Sign-in tab.` : ''}</div></div>`}
-      ${f.provider === 'local' && html`<div class="full stack" style="gap:8px">
-        <${Check} label="Set the password myself" desc="Otherwise a one-time password is generated for you to share. Either way they must change it at first sign-in." checked=${f.setPw} onChange=${(v) => setF({ ...f, setPw: v })} />
-        ${f.setPw && html`<input type="password" autocomplete="new-password" placeholder="Initial password" value=${f.password} onInput=${(e) => setF({ ...f, password: e.target.value })} />`}</div>`}
       <${Field} label="Role" full><${RolePicker} value=${f.role} onChange=${(role) => setF({ ...f, role })} roleInfo=${roleInfo} /></${Field}>
+      <div class="full callout info">🔑 <div>A <b>temporary password is generated automatically</b> when you add the user. It's valid for ${hours} hours, and they choose their own password at first sign-in.</div></div>
     </div></${Modal}>`;
 }
 
@@ -67,7 +86,7 @@ function EditUserModal({ user, me, onDone, roleInfo }) {
         <${Field} label="Role" full>${self ? html`<div><${RoleBadge} role=${user.role} /></div>` : html`<${RolePicker} value=${f.role} onChange=${(role) => setF({ ...f, role })} roleInfo=${roleInfo} />`}</${Field}>
       </div>
       <dl class="kv">
-        <dt>Sign-in methods</dt><dd>${[user.ms_oid && 'Microsoft (linked)', user.provider === 'microsoft' && !user.ms_oid && 'Microsoft (not signed in yet)', user.has_password && 'Password'].filter(Boolean).join(' · ') || '—'}</dd>
+        <dt>Password</dt><dd>${!user.has_password ? 'Not set: generate a temporary password from the Users list' : user.temp_password_expired ? 'Temporary password expired' : user.must_change_password ? `Temporary password, valid until ${fmtDate(user.temp_password_expires_at)}` : 'Chosen by the user'}</dd>
         <dt>Last sign-in</dt><dd>${user.last_login_at ? `${fmtDate(user.last_login_at)} (${fmtAgo(user.last_login_at)})` : 'Never'}</dd>
         <dt>Created</dt><dd>${fmtDate(user.created_at)}</dd>
         <dt>Runs started</dt><dd>${user.runs_started}</dd>
@@ -77,16 +96,31 @@ function EditUserModal({ user, me, onDone, roleInfo }) {
     </div></${Modal}>`;
 }
 
-function Users({ me, roleInfo, msEnabled }) {
+function UserStatus({ u }) {
+  if (u.disabled) return html`<span class="badge b-error">Disabled</span>`;
+  if (!u.has_password) return html`<span class="badge b-warn" title="Generate a temporary password so they can sign in">No password</span>`;
+  if (u.temp_password_expired) return html`<span class="badge b-error" title="Generate a new temporary password">Temp password expired</span>`;
+  if (u.must_change_password) {
+    return html`<span class="badge b-warn" title=${u.temp_password_expires_at ? `Temporary password valid until ${fmtDate(u.temp_password_expires_at)}` : 'Must choose a new password at next sign-in'}>Invited</span>
+      ${u.temp_password_expires_at && html`<div class="small muted">expires ${fmtIn(u.temp_password_expires_at)}</div>`}`;
+  }
+  return html`<span class="badge b-pass">Active</span>`;
+}
+const fmtIn = (iso) => {
+  const h = Math.round((Date.parse(iso) - Date.now()) / 3600e3);
+  return h <= 0 ? 'within the hour' : h < 48 ? `in ${h}h` : `in ${Math.round(h / 24)} days`;
+};
+
+function Users({ me, roleInfo }) {
   const { data, reload } = useApi('/admin/users');
   const [filter, setFilter] = useState('');
   const [role, setRole] = useState('');
   const list = (data || []).filter((u) => (!role || u.role === role) && (!filter || `${u.email} ${u.name}`.toLowerCase().includes(filter.toLowerCase())));
   const open = (u) => setStore({ modal: html`<${EditUserModal} user=${u} me=${me} onDone=${reload} roleInfo=${roleInfo} />` });
   const reset = async (u) => {
-    if (!await confirmDialog({ title: 'Reset password?', message: `Generate a one-time password for ${u.email}? Their current password stops working and all their sessions are signed out.`, okLabel: 'Reset password' })) return;
+    if (!await confirmDialog({ title: 'Generate a new temporary password?', message: `A new temporary password is generated for ${u.email}. Their current password stops working and they are signed out everywhere.`, okLabel: 'Generate password' })) return;
     const r = await act(() => api(`/admin/users/${u.id}/reset-password`, { method: 'POST' }));
-    if (r) { setStore({ modal: html`<${TempPasswordModal} title="Password reset" email=${u.email} password=${r.tempPassword} />` }); reload(); }
+    if (r) { setStore({ modal: html`<${TempPasswordModal} result=${r} reset />` }); reload(); }
   };
   const signOutAll = async (u) => {
     const r = await act(() => api(`/admin/users/${u.id}/sessions`, { method: 'DELETE' }));
@@ -107,21 +141,20 @@ function Users({ me, roleInfo, msEnabled }) {
       ${[['', 'All', counts.all], ['admin', 'Admins', counts.admin], ['editor', 'Editors', counts.editor], ['viewer', 'Viewers', counts.viewer]].map(([r, l, n]) => html`
         <span class="chip ${role === r ? 'on' : ''}" onClick=${() => setRole(r)}>${l} <span class="n">${n}</span></span>`)}
       <span class="spacer"></span>
-      <button class="btn primary" onClick=${() => setStore({ modal: html`<${NewUserModal} onDone=${reload} roleInfo=${roleInfo} msEnabled=${msEnabled} />` })}>+ Add user</button>
+      <button class="btn primary" onClick=${() => setStore({ modal: html`<${NewUserModal} onDone=${reload} roleInfo=${roleInfo} />` })}>+ Add user</button>
     </div>
     <div class="panel">${!data ? html`<div class="panel-b"><${Spinner} /></div>` : list.length === 0 ? html`<${Empty} title="No matching users" />` : html`
-      <table class="t"><thead><tr><th>User</th><th>Role</th><th>Sign-in</th><th>Status</th><th>Last sign-in</th><th>Sessions</th><th></th></tr></thead><tbody>
+      <table class="t"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last sign-in</th><th>Sessions</th><th></th></tr></thead><tbody>
         ${list.map((u) => html`<tr class=${u.disabled ? 'dim' : ''}>
           <td><a href="#" onClick=${(e) => { e.preventDefault(); open(u); }}><b>${u.name || u.email}</b></a>${u.id === me.id && html` <span class="tag">you</span>`}
             ${u.name && html`<div class="small muted">${u.email}</div>`}</td>
           <td><${RoleBadge} role=${u.role} /></td>
-          <td class="small">${u.ms_oid ? html`<span title="Linked Microsoft account">Microsoft ✓</span>` : u.provider === 'microsoft' ? html`<span class="muted" title="Will be linked at first sign-in">Microsoft (pending)</span>` : 'Password'}</td>
-          <td>${u.disabled ? html`<span class="badge b-error">Disabled</span>` : u.must_change_password ? html`<span class="badge b-warn" title="Must choose a new password at next sign-in">Pending password</span>` : html`<span class="badge b-pass">Active</span>`}</td>
+          <td><${UserStatus} u=${u} /></td>
           <td class="muted">${u.last_login_at ? fmtAgo(u.last_login_at) : 'Never'}</td>
           <td class="muted">${u.active_sessions}</td>
           <td style="text-align:right"><div class="row" style="justify-content:flex-end">
             <button class="btn sm" onClick=${() => open(u)}>Edit</button>
-            ${u.has_password || u.provider === 'local' ? html`<button class="btn sm ghost" onClick=${() => reset(u)}>Reset password</button>` : ''}
+            <button class="btn sm ${u.temp_password_expired || !u.has_password ? '' : 'ghost'}" onClick=${() => reset(u)}>${u.must_change_password || !u.has_password ? 'New temporary password' : 'Reset password'}</button>
             ${u.active_sessions > 0 && html`<button class="btn sm ghost" onClick=${() => signOutAll(u)}>Sign out</button>`}
             ${u.id !== me.id && html`<button class="btn sm ghost" onClick=${() => toggle(u)}>${u.disabled ? 'Enable' : 'Disable'}</button>
               <button class="btn sm ghost danger" onClick=${() => del(u)}>Delete</button>`}
@@ -130,91 +163,39 @@ function Users({ me, roleInfo, msEnabled }) {
   </div>`;
 }
 
-// ================================================================== sign-in
-function SignIn() {
+// ================================================================= settings
+function Settings() {
   const { data, reload } = useApi('/admin/settings');
-  const [f, setF] = useState(null);
-  const [testing, setTesting] = useState(false);
-  useEffect(() => {
-    if (!data) return;
-    const m = data.microsoft;
-    setF({
-      localLogin: data.localLogin, publicUrl: data.publicUrl,
-      ms: { enabled: m.enabled, tenant: m.tenant, clientId: m.clientId, clientSecret: '', buttonLabel: m.buttonLabel, allowedDomains: m.allowedDomains.join(', '), allowedTenants: m.allowedTenants.join(', '), autoProvision: m.autoProvision, defaultRole: m.defaultRole },
-    });
-  }, [data]);
-  if (!data || !f) return html`<${Spinner} />`;
-  const L = data.locked;
-  const setMs = (k, v) => setF({ ...f, ms: { ...f.ms, [k]: v } });
-  const inp = (k, props = {}) => html`<input type="text" value=${f.ms[k]} disabled=${L[k]} onInput=${(e) => setMs(k, e.target.value)} ...${props} />`;
+  const sys = useApi('/admin/system');
+  const [publicUrl, setPublicUrl] = useState(null);
+  useEffect(() => { if (data) setPublicUrl(data.publicUrl); }, [data]);
+  if (!data || publicUrl === null) return html`<${Spinner} />`;
   const save = async () => {
-    const body = { localLogin: f.localLogin, microsoft: { ...f.ms } };
-    if (!L.publicUrl) body.publicUrl = f.publicUrl.trim();
-    for (const k of ['tenant', 'clientId', 'clientSecret']) if (L[k]) delete body.microsoft[k];
-    const r = await act(() => api('/admin/settings', { method: 'PUT', body }), 'Sign-in settings saved');
+    const r = await act(() => api('/admin/settings', { method: 'PUT', body: { publicUrl: publicUrl.trim() } }), 'Settings saved');
     if (r) reload();
   };
-  const test = async () => {
-    setTesting(true);
-    const r = await act(() => api('/admin/settings/microsoft/test', { method: 'POST', body: { tenant: f.ms.tenant } }));
-    setTesting(false);
-    if (r) toast(`Tenant found: ${r.issuer}`, 'ok');
-  };
-  const clearSecret = async () => {
-    if (!await confirmDialog({ title: 'Remove client secret?', message: 'Microsoft sign-in stops working until a new secret is saved.', okLabel: 'Remove', danger: true })) return;
-    await act(() => api('/admin/settings', { method: 'PUT', body: { microsoft: { clearSecret: true } } }), 'Secret removed');
-    reload();
-  };
-  const envHint = (k, name) => (L[k] ? `Set by ${name} in .env` : undefined);
-  const problem = data.microsoft.problem;
+  const st = sys.data?.settings;
   return html`<div class="stack">
-    <div class="panel"><div class="panel-h"><div><h3>Microsoft sign-in (Entra ID)</h3><div class="small muted">Single sign-on with your organisation's Microsoft accounts, including MFA and conditional-access policies.</div></div>
-      ${data.microsoft.enabled && !problem ? html`<span class="badge b-pass">Active</span>` : html`<span class="badge b-skipped">${data.microsoft.enabled ? 'Incomplete' : 'Off'}</span>`}</div>
+    <div class="panel"><div class="panel-h"><div><h3>Web address</h3><div class="small muted">Only needed when people reach the validator through a Cloudflare tunnel, reverse proxy or custom domain.</div></div></div>
       <div class="panel-b stack">
-        ${data.microsoft.enabled && problem && html`<div class="callout warn">⚠ <div>${problem}</div></div>`}
-        ${f.ms.enabled !== data.microsoft.enabled && html`<div class="callout info">ℹ <div>Save to apply.</div></div>`}
-        <details class="guide" open=${!data.microsoft.clientId}>
-          <summary><b>How to set up (5 minutes, free)</b></summary>
-          <ol>
-            <li>In the <a href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener">Microsoft Entra admin center</a> open <b>App registrations → New registration</b>.</li>
-            <li>Name it “PBI Validator”, choose <b>Accounts in this organizational directory only</b>, and under Redirect URI pick <b>Web</b> and paste:<${CopyBox} value=${data.redirectUri} /></li>
-            <li>On the app's <b>Overview</b> page copy the <b>Application (client) ID</b> and <b>Directory (tenant) ID</b> into the fields below.</li>
-            <li>Open <b>Certificates & secrets → New client secret</b>, copy its <b>Value</b> (not the Secret ID) into “Client secret”. Note the expiry date and renew it before then.</li>
-            <li>Save, then sign in with Microsoft once from a private window to check it.</li>
-          </ol>
-          <p class="small muted">Serving through a Cloudflare tunnel or a custom domain? Set the <b>Public URL</b> below first so the redirect URI matches what people type in the browser. Every address you use must be registered in Entra.</p>
-        </details>
-        <${Check} label="Enable Microsoft sign-in" desc="Shows “Sign in with Microsoft” on the sign-in page." checked=${f.ms.enabled} onChange=${(v) => setMs('enabled', v)} />
-        <div class="form-grid">
-          <${Field} label="Directory (tenant) ID" hint=${envHint('tenant', 'MS_TENANT_ID') || 'GUID or primary domain, e.g. contoso.onmicrosoft.com'}>
-            <div class="row" style="flex-wrap:nowrap">${inp('tenant', { placeholder: '00000000-0000-0000-0000-000000000000' })}<button class="btn" disabled=${!f.ms.tenant || testing} onClick=${test}>${testing ? 'Testing…' : 'Test'}</button></div></${Field}>
-          <${Field} label="Application (client) ID" hint=${envHint('clientId', 'MS_CLIENT_ID')}>${inp('clientId', { placeholder: '00000000-0000-0000-0000-000000000000' })}</${Field}>
-          <${Field} label="Client secret" hint=${envHint('clientSecret', 'MS_CLIENT_SECRET') || (data.microsoft.hasSecret ? 'A secret is saved. Leave empty to keep it.' : 'Stored on the server only; never shown again.')}>
-            <div class="row" style="flex-wrap:nowrap"><input type="password" autocomplete="off" disabled=${L.clientSecret} placeholder=${data.microsoft.hasSecret ? '•••••••• (saved)' : 'Secret value'} value=${f.ms.clientSecret} onInput=${(e) => setMs('clientSecret', e.target.value)} />
-            ${data.microsoft.hasSecret && !L.clientSecret && html`<button class="btn ghost danger" onClick=${clearSecret}>Remove</button>`}</div></${Field}>
-          <${Field} label="Button text" hint="Optional">${inp('buttonLabel', { placeholder: 'Sign in with Microsoft' })}</${Field}>
-          <${Field} label="Redirect URI" hint="Register exactly this in Entra (Authentication → Web)." full><${CopyBox} value=${data.redirectUri} /></${Field}>
-        </div>
-        <div class="fieldset"><h4>Who may sign in</h4><div class="form-grid">
-          <${Field} label="Allowed email domains" hint="Comma-separated. Empty = any account in the tenant.">${inp('allowedDomains', { placeholder: 'contoso.com, contoso.co.uk' })}</${Field}>
-          <${Field} label="Allowed tenant IDs" hint="Only needed for multi-tenant (“organizations”) sign-in.">${inp('allowedTenants', { placeholder: 'tenant GUIDs, comma-separated' })}</${Field}>
-          <div class="full"><${Check} label="Create accounts automatically" desc="Anyone allowed above gets an account at first sign-in with the default role. Turn off for invite-only: add people in Users first." checked=${f.ms.autoProvision} onChange=${(v) => setMs('autoProvision', v)} /></div>
-          ${f.ms.autoProvision && html`<${Field} label="Default role for new accounts"><select value=${f.ms.defaultRole} onChange=${(e) => setMs('defaultRole', e.target.value)}>
-            <option value="viewer">Viewer (read-only)</option><option value="editor">Editor</option></select></${Field}>`}
-        </div></div>
+        <${Field} label="Public URL" hint=${data.locked.publicUrl ? 'Set by PUBLIC_URL in .env' : 'The address people type, e.g. https://pbi.contoso.com. Leave empty to accept whatever address the browser used.'}>
+          <input type="url" disabled=${data.locked.publicUrl} value=${publicUrl} onInput=${(e) => setPublicUrl(e.target.value)} placeholder="https://pbi.contoso.com" /></${Field}>
+        ${!data.locked.publicUrl && html`<div class="row"><span class="spacer"></span><button class="btn" disabled=${publicUrl === data.publicUrl} onClick=${() => setPublicUrl(data.publicUrl)}>Discard</button>
+          <button class="btn primary" disabled=${publicUrl === data.publicUrl} onClick=${save}>Save</button></div>`}
       </div></div>
-
-    <div class="panel"><div class="panel-h"><h3>Password sign-in & address</h3></div><div class="panel-b stack">
-      <${Check} label="Allow email + password sign-in" desc="Turn off to require Microsoft sign-in for everyone. An administrator must have signed in with Microsoft first." checked=${f.localLogin} onChange=${(v) => setF({ ...f, localLogin: v })} />
-      <${Field} label="Public URL" hint=${L.publicUrl ? 'Set by PUBLIC_URL in .env' : 'The address people use, e.g. https://pbi.contoso.com. Used for the Microsoft redirect URI. Leave empty to use whatever address the browser used.'}>
-        <input type="url" disabled=${L.publicUrl} value=${f.publicUrl} onInput=${(e) => setF({ ...f, publicUrl: e.target.value })} placeholder="https://pbi.contoso.com" /></${Field}>
-    </div></div>
-    <div class="row"><span class="spacer"></span><button class="btn" onClick=${reload}>Discard changes</button><button class="btn primary" onClick=${save}>Save sign-in settings</button></div>
+    <div class="panel"><div class="panel-h"><div><h3>Sign-in security</h3><div class="small muted">Everyone signs in with email and password. Change these in <code>.env</code> and restart.</div></div></div>
+      <div class="panel-b">${!st ? html`<${Spinner} />` : html`<dl class="kv">
+        <dt>Passwords</dt><dd>At least ${st.passwordMinLength} characters, common passwords refused, stored as scrypt hashes <span class="muted small">(PASSWORD_MIN_LENGTH)</span></dd>
+        <dt>Sessions</dt><dd>Signed out after ${st.sessionIdleHours} hours of inactivity and after ${st.sessionMaxDays} days at most <span class="muted small">(SESSION_IDLE_HOURS, SESSION_MAX_DAYS)</span></dd>
+        <dt>Lockout</dt><dd>Repeated wrong passwords block that email for 15 minutes <span class="muted small">(LOGIN_MAX_ATTEMPTS)</span></dd>
+        <dt>New users</dt><dd>Added by an administrator in Users. A temporary password is generated automatically, valid for ${st.tempPasswordHours} hours, and replaced by the user at first sign-in <span class="muted small">(TEMP_PASSWORD_HOURS)</span></dd>
+        <dt>Locked out?</dt><dd>On the server: <code>npm run cli -- reset-password you@company.com</code></dd>
+      </dl>`}</div></div>
   </div>`;
 }
 
 // ==================================================================== audit
-const ACTION_GROUPS = [['', 'All actions'], ['login', 'Sign-ins'], ['user', 'User management'], ['settings', 'Settings'], ['account', 'Own account'], ['suite', 'Suites'], ['report', 'Reports'], ['profile', 'Auth profiles'], ['run', 'Runs'], ['ai', 'AI']];
+const ACTION_GROUPS = [['', 'All actions'], ['login', 'Sign-ins'], ['user', 'User management'], ['settings', 'Settings'], ['account', 'Own account'], ['suite', 'Suites'], ['report', 'Reports'], ['profile', 'Power BI sign-ins'], ['run', 'Runs'], ['ai', 'AI']];
 const actionKind = (a) => (/failed|blocked/.test(a) ? 'fail' : /delete|revoke|disable|reset/.test(a) ? 'diff' : /login\.success|setup/.test(a) ? 'pass' : 'skipped');
 
 function Audit() {
@@ -306,7 +287,7 @@ export function Admin({ tab = 'users' }) {
   const active = TABS.some(([k]) => k === tab) ? tab : 'users';
   const sub = {
     users: 'Who can use the validator and what they can do.',
-    'sign-in': 'How people sign in: Microsoft accounts, passwords, or both.',
+    settings: 'Web address and sign-in security.',
     audit: 'Who signed in and who changed what, when, and from where.',
     system: 'Health, storage and configuration of this server.',
   }[active];
@@ -314,8 +295,8 @@ export function Admin({ tab = 'users' }) {
     <${Topbar} title="Admin" sub=${sub} />
     <div class="content">
       <div class="tabs">${TABS.map(([k, l]) => html`<button class=${active === k ? 'on' : ''} onClick=${() => go(`/admin/${k}`)}>${l}</button>`)}</div>
-      ${active === 'users' && html`<${Users} me=${me} roleInfo=${s.me.roleInfo} msEnabled=${s.authConfig?.microsoft?.enabled} />`}
-      ${active === 'sign-in' && html`<${SignIn} />`}
+      ${active === 'users' && html`<${Users} me=${me} roleInfo=${s.me.roleInfo} />`}
+      ${active === 'settings' && html`<${Settings} />`}
       ${active === 'audit' && html`<${Audit} />`}
       ${active === 'system' && html`<${System} />`}
     </div>`;

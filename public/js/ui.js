@@ -1,4 +1,4 @@
-import { html, useEffect, useStore, setStore, api, toast, copyText, STATUS_LABEL } from './lib.js';
+import { html, useState, useEffect, useRef, useStore, setStore, api, toast, copyText, STATUS_LABEL } from './lib.js';
 
 export const Badge = ({ s, label }) => html`<span class="badge b-${s}">${label || STATUS_LABEL[s] || String(s).replace(/_/g, ' ')}</span>`;
 
@@ -61,6 +61,24 @@ export function ModalHost() {
 /** Read-only value with a copy button (one-time passwords, keys, redirect URIs). */
 export const CopyBox = ({ value, label = 'Copy' }) => html`<div class="copybox"><code>${value}</code>
   <button type="button" class="btn sm" onClick=${() => copyText(value)}>${label}</button></div>`;
+
+/** Dropdown menu. items: [{ label, desc, icon, onClick }] or 'divider'. Closes on outside click / Escape. */
+export function Menu({ label, items, className = '', align = 'right' }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (e.type === 'keydown' ? e.key === 'Escape' : !ref.current?.contains(e.target)) setOpen(false); };
+    addEventListener('mousedown', close); addEventListener('keydown', close);
+    return () => { removeEventListener('mousedown', close); removeEventListener('keydown', close); };
+  }, [open]);
+  return html`<div class="menu" ref=${ref}>
+    <button type="button" class="btn ${className}" aria-haspopup="menu" aria-expanded=${open} onClick=${() => setOpen(!open)}>${label} <span class="caret">▾</span></button>
+    ${open && html`<div class="menu-pop ${align}" role="menu">${items.filter(Boolean).map((it) => (it === 'divider' ? html`<div class="menu-div"></div>` : html`
+      <button type="button" role="menuitem" class="menu-item" onClick=${() => { setOpen(false); it.onClick(); }}>
+        <span class="mi-ico">${it.icon || ''}</span><span><b>${it.label}</b>${it.desc && html`<small>${it.desc}</small>`}</span></button>`))}</div>`}
+  </div>`;
+}
 
 /** Runs an async action with toast feedback; returns its result. */
 export async function act(fn, ok) {

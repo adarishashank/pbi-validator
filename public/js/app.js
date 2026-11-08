@@ -15,7 +15,7 @@ const NAV = [
   ['reports', '⧉', 'Report links'],
   ['suites', '⇄', 'Test suites'],
   ['runs', '▶', 'Runs'],
-  ['profiles', '⚿', 'Auth profiles'],
+  ['profiles', '⚿', 'Power BI sign-ins'],
 ];
 
 function Health() {
@@ -57,7 +57,7 @@ function Shell({ parts, query }) {
   const nav = can('admin') ? [...NAV, ['admin', '⚙', 'Admin']] : NAV;
   return html`<div class="shell">
     <aside class="side">
-      <div class="brand"><div class="brand-mark">▮</div><div>PBI Validator<small>Report regression testing</small></div></div>
+      <div class="brand"><div class="brand-mark"><svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect x="7" y="16" width="4" height="9" fill="currentColor"/><rect x="14" y="10" width="4" height="15" fill="currentColor"/><rect x="21" y="6" width="4" height="19" fill="currentColor"/></svg></div><div>PBI Validator<small>Report regression testing</small></div></div>
       <nav class="nav">${nav.map(([p, ico, label]) => html`<a href=${`#/${p}`} class=${top === p ? 'active' : ''}><span class="ico">${ico}</span>${label}</a>`)}</nav>
       ${!can('editor') && html`<div class="side-note">👁 Read-only access. Ask an admin for the editor role to change things or start runs.</div>`}
       <div class="side-foot"><${UserMenu} user=${user} top=${top} /><${Health} /><${AiBadge} /></div>
@@ -75,7 +75,7 @@ function App() {
   useEffect(() => { document.body.dataset.role = s.me?.user?.role || ''; }, [s.me?.user?.role]);
 
   const signedIn = Boolean(s.me?.user);
-  // Signed in but sitting on #/login (e.g. after a Microsoft redirect): go home.
+  // Signed in but sitting on #/login (e.g. a bookmark): go home.
   useEffect(() => { if (signedIn && parts[0] === 'login' && !query.get('error')) go('/'); }, [signedIn, routeKey]);
 
   let body;

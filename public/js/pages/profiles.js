@@ -9,7 +9,7 @@ function ProfileForm({ profile, onDone }) {
     const r = await act(() => api(profile ? `/profiles/${profile.id}` : '/profiles', { method: profile ? 'PUT' : 'POST', body: f }), 'Profile saved');
     if (r) { setStore({ modal: null }); onDone(); }
   };
-  return html`<${Modal} title=${profile ? 'Edit auth profile' : 'New auth profile'} onClose=${() => setStore({ modal: null })}
+  return html`<${Modal} title=${profile ? 'Edit Power BI sign-in' : 'New Power BI sign-in'} onClose=${() => setStore({ modal: null })}
     footer=${html`<button class="btn" onClick=${() => setStore({ modal: null })}>Cancel</button><button class="btn primary" onClick=${save}>Save</button>`}>
     <div class="form-grid">
       <${Field} label="Name" full><input type="text" value=${f.name} onInput=${set('name')} placeholder="e.g. Contoso tenant · QA account" /></${Field}>
@@ -52,12 +52,12 @@ export function Profiles() {
   const forget = async (p) => { await act(() => api(`/profiles/${p.id}/session`, { method: 'DELETE' }), 'Session removed'); reload(); };
 
   return html`
-    <${Topbar} title="Auth profiles" sub="Saved Microsoft sessions used to open secured reports headlessly. Each report link can use a different profile (e.g. different tenants for A and B).">
-      <button class="btn ed primary" onClick=${() => edit(null)}>+ New profile</button>
+    <${Topbar} title="Power BI sign-ins" sub="The Microsoft accounts the validator uses to open secured Power BI reports. Each report link can use a different one (e.g. different tenants for A and B). Not related to how people sign in to this website.">
+      <button class="btn ed primary" onClick=${() => edit(null)}>+ New sign-in</button>
     </${Topbar}>
     <div class="content stack">
       <div class="callout info">ℹ <div><b>How it works:</b> “Sign in” opens a real browser window on the machine running the validator. Complete SSO/MFA there; once Power BI loads, the session is captured to <code>data/auth</code> (owner-only file permissions) and the window closes. Public “publish to web” links need no profile.</div></div>
-      ${list.length === 0 ? html`<div class="panel"><${Empty} title="No auth profiles">Create one for each Microsoft account/tenant you need.</${Empty}></div>` : html`
+      ${list.length === 0 ? html`<div class="panel"><${Empty} title="No Power BI sign-ins yet">Create one for each Microsoft account or tenant your reports need. Public “publish to web” links need none.</${Empty}></div>` : html`
       <div class="panel"><table class="t"><thead><tr><th>Profile</th><th>Status</th><th>Last sign-in</th><th>Last checked</th><th></th></tr></thead><tbody>
         ${list.map((p) => html`<tr>
           <td><b>${p.name}</b>${p.description && html`<div class="small muted">${p.description}</div>`}</td>

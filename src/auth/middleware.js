@@ -31,9 +31,11 @@ export function isLocalRequest(req) {
   return loopback && !req.headers['x-forwarded-for'] && !req.headers['cf-connecting-ip'] && !req.headers.forwarded;
 }
 
-export function setSessionCookie(req, res, token) {
+/** persistent=false → a browser-session cookie, gone when the browser is closed ("Keep me signed in" unticked). */
+export function setSessionCookie(req, res, token, { persistent = true } = {}) {
   const secure = req.secure ? '; Secure' : '';
-  res.append('Set-Cookie', `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${sessionCookieMaxAge()}${secure}`);
+  const maxAge = persistent ? `; Max-Age=${sessionCookieMaxAge()}` : '';
+  res.append('Set-Cookie', `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/${maxAge}${secure}`);
 }
 export function clearSessionCookie(req, res) {
   res.append('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${req.secure ? '; Secure' : ''}`);
@@ -107,7 +109,7 @@ const ACTIONS = [
   ['POST', /^\/runs\/(\d+)\/ai\/analyze$/, 'ai.analyze'], ['POST', /^\/results\/(\d+)\/ai\/explain$/, 'ai.explain'], ['POST', /^\/runs\/(\d+)\/ai\/ask$/, 'ai.ask'],
   ['POST', /^\/admin\/users$/, 'user.create'], ['PUT', /^\/admin\/users\/(\d+)$/, 'user.update'], ['DELETE', /^\/admin\/users\/(\d+)$/, 'user.delete'],
   ['POST', /^\/admin\/users\/(\d+)\/reset-password$/, 'user.reset_password'], ['DELETE', /^\/admin\/users\/(\d+)\/sessions$/, 'user.revoke_sessions'],
-  ['PUT', /^\/admin\/settings$/, 'settings.update'], ['POST', /^\/admin\/settings\/microsoft\/test$/, 'settings.test_microsoft'],
+  ['PUT', /^\/admin\/settings$/, 'settings.update'],
   ['POST', /^\/auth\/password$/, 'account.change_password'], ['POST', /^\/auth\/api-keys$/, 'account.create_api_key'],
   ['DELETE', /^\/auth\/api-keys\/(\d+)$/, 'account.delete_api_key'], ['DELETE', /^\/auth\/sessions(?:\/([\w-]+))?$/, 'account.revoke_sessions'],
 ];

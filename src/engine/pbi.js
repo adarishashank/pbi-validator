@@ -53,7 +53,7 @@ export class PbiReport {
     const deadline = Date.now() + loadTimeoutMs;
     while (Date.now() < deadline) {
       if (loginRe.test(this.page.url())) {
-        throw new ReportError('AUTH_REQUIRED', `Redirected to sign-in (${new URL(this.page.url()).host}). The auth profile session is missing or expired — sign in again from "Auth profiles".`);
+        throw new ReportError('AUTH_REQUIRED', `Redirected to sign-in (${new URL(this.page.url()).host}). The auth profile session is missing or expired — sign in again from "Power BI sign-ins".`);
       }
       for (const f of this.page.frames()) {
         const n = await f.locator(this.sel.visualContainer).count().catch(() => 0);

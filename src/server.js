@@ -7,7 +7,7 @@ import { recoverInterruptedRuns } from './db.js';
 import { createLogger } from './logger.js';
 import api from './api/routes.js';
 import adminApi from './api/admin.js';
-import { authApi, browserAuth } from './api/auth.js';
+import { authApi } from './api/auth.js';
 import { authenticate, auditTrail } from './auth/middleware.js';
 import { userCount } from './auth/users.js';
 import { syncSchedules, startHousekeeping } from './jobs/scheduler.js';
@@ -32,7 +32,6 @@ export function createApp() {
   // Every API call and screenshot requires a signed-in user (or API key /
   // API_TOKEN). Roles are enforced per endpoint; writes are audited.
   app.use(['/api', '/artifacts'], express.json({ limit: '10mb' }), authenticate);
-  app.use(browserAuth);
   app.use('/api', auditTrail, authApi, adminApi, api);
 
   // Run artifacts (screenshots) and discovery thumbnails.

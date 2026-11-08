@@ -154,6 +154,8 @@ CREATE TABLE IF NOT EXISTS settings (
 // Additive migrations for databases created by earlier versions.
 const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
 if (!hasColumn('runs', 'triggered_by')) db.exec('ALTER TABLE runs ADD COLUMN triggered_by TEXT');
+// When a one-time (temporary) password stops working; NULL once the user has chosen their own.
+if (!hasColumn('users', 'temp_password_expires_at')) db.exec('ALTER TABLE users ADD COLUMN temp_password_expires_at TEXT');
 
 // The database holds password hashes and SSO settings: owner-only access.
 for (const f of [config.dbPath, `${config.dbPath}-wal`, `${config.dbPath}-shm`]) {

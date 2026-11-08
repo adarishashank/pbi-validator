@@ -21,7 +21,7 @@ function ReportForm({ report, profiles, onDone }) {
       <${Field} label="Environment / label"><input type="text" value=${f.environment} onInput=${set('environment')} placeholder="DEV, UAT, PROD…" /></${Field}>
       <${Field} label="Report URL" full hint="Service link (app.powerbi.com/groups/…/reports/…), app link, embed link (reportEmbed?…), or publish-to-web link (view?r=…). Any page works — all pages are discovered.">
         <input type="url" value=${f.url} onInput=${set('url')} placeholder="https://app.powerbi.com/groups/…/reports/…" /></${Field}>
-      <${Field} label="Auth profile" hint=${isPublic ? 'Publish-to-web links are public — no profile needed.' : 'Session used to open this report.'}>
+      <${Field} label="Power BI sign-in" hint=${isPublic ? 'Publish-to-web links are public — no profile needed.' : 'Session used to open this report.'}>
         <select value=${f.auth_profile_id || ''} onChange=${set('auth_profile_id')}>
           <option value="">— None (public / anonymous) —</option>
           ${profiles.map((p) => html`<option value=${p.id}>${p.name}${p.status !== 'active' ? ` (${p.status.replace('_', ' ')})` : ''}</option>`)}

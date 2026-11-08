@@ -7,6 +7,8 @@ import { runQueue, bus, deleteRun } from '../jobs/queue.js';
 import { syncSchedules, validateCron, nextRunOf } from '../jobs/scheduler.js';
 import { discoverReport } from '../jobs/discovery.js';
 import { loadRunBundle, junitXml, streamHtmlZip } from '../jobs/export.js';
+import { runSheets, runsListSheets, renderRunPdf } from '../jobs/report.js';
+import { xlsxBuffer } from '../jobs/xlsx.js';
 import { SuiteConfigSchema, DEFAULT_SUITE_CONFIG } from '../engine/options.js';
 import { DEFAULT_SELECTORS } from '../engine/selectors.js';
 import { aiStatus } from '../ai/client.js';
@@ -237,13 +239,22 @@ router.post('/suites/:id/run', wrap((req, res) => {
 }));
 
 // ------------------------------------------------------------------- runs
-router.get('/runs', (req, res) => {
+const listRuns = (query, max = 500) => {
   const where = [], params = [];
-  if (req.query.suite) { where.push('suite_id = ?'); params.push(Number(req.query.suite)); }
-  if (req.query.status) { where.push('status = ?'); params.push(String(req.query.status)); }
-  const limit = Math.min(Number(req.query.limit) || 100, 500);
-  res.json(q.all(`SELECT id, suite_id, suite_name, trigger, triggered_by, status, progress, phase, summary, error, queued_at, started_at, finished_at FROM runs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ${limit}`, ...params));
-});
+  if (query.suite) { where.push('suite_id = ?'); params.push(Number(query.suite)); }
+  if (query.status) { where.push('status = ?'); params.push(String(query.status)); }
+  const limit = Math.min(Number(query.limit) || 100, max);
+  return q.all(`SELECT id, suite_id, suite_name, trigger, triggered_by, status, progress, phase, summary, error, queued_at, started_at, finished_at FROM runs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ${limit}`, ...params);
+};
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const download = (res, type, filename) => res.type(type).setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+const stamp = () => new Date().toISOString().slice(0, 10);
+
+router.get('/runs', (req, res) => res.json(listRuns(req.query)));
+router.get('/runs/export.xlsx', wrap(async (req, res) => {
+  const buf = await xlsxBuffer(runsListSheets(listRuns({ ...req.query, limit: req.query.limit || 5000 }, 5000)));
+  download(res, XLSX_TYPE, `pbi-validation-runs-${stamp()}.xlsx`).send(buf);
+}));
 router.get('/runs/:id', wrap((req, res) => res.json(mustGet('runs', idParam(req)))));
 router.delete('/runs/:id', wrap((req, res) => {
   const id = idParam(req); const run = mustGet('runs', id);
@@ -288,6 +299,21 @@ router.get('/runs/:id/junit.xml', wrap((req, res) => {
   if (!b) throw httpError(404, 'Run not found');
   res.type('application/xml').setHeader('Content-Disposition', `attachment; filename="pbi-validation-run-${b.run.id}.junit.xml"`);
   res.send(junitXml(b));
+}));
+router.get('/runs/:id/export.xlsx', wrap(async (req, res) => {
+  const b = loadRunBundle(idParam(req));
+  if (!b) throw httpError(404, 'Run not found');
+  download(res, XLSX_TYPE, `pbi-validation-run-${b.run.id}.xlsx`).send(await xlsxBuffer(runSheets(b)));
+}));
+router.get('/runs/:id/report.pdf', wrap(async (req, res) => {
+  const b = loadRunBundle(idParam(req));
+  if (!b) throw httpError(404, 'Run not found');
+  if (['queued', 'running'].includes(b.run.status)) throw httpError(409, 'The run is still in progress; export it when it has finished');
+  const pdf = await renderRunPdf(b);
+  // inline: opens in the browser's PDF viewer; ?download=1 saves straight to disk.
+  res.type('application/pdf').setHeader('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="pbi-validation-run-${b.run.id}.pdf"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(pdf);
 }));
 router.get('/runs/:id/export.zip', wrap((req, res) => {
   const b = loadRunBundle(idParam(req));

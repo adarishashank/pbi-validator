@@ -16,7 +16,7 @@ export function Dashboard() {
       <a class="btn ed primary" href="#/suites">Run a suite</a>
     </${Topbar}>
     <div class="content stack">
-      ${needLogin.length > 0 && html`<div class="callout warn">⚠ <div><b>${needLogin.length} auth profile(s) need sign-in:</b> ${needLogin.map((p) => p.name).join(', ')}. Runs that use them will be redirected to the Microsoft login page. <a href="#/profiles">Sign in →</a></div></div>`}
+      ${needLogin.length > 0 && html`<div class="callout warn">⚠ <div><b>${needLogin.length === 1 ? 'A Power BI sign-in needs' : `${needLogin.length} Power BI sign-ins need`} attention:</b> ${needLogin.map((p) => p.name).join(', ')}. Runs that use ${needLogin.length === 1 ? 'it' : 'them'} can't open secured reports until you sign in again. <a href="#/profiles">Sign in →</a></div></div>`}
       <div class="grid g4">
         <div class="panel kpi"><div class="l">Report links</div><div class="v">${s.reports ?? '–'}</div></div>
         <div class="panel kpi"><div class="l">Test suites</div><div class="v">${s.suites ?? '–'}</div></div>
@@ -25,7 +25,7 @@ export function Dashboard() {
       </div>
 
       ${fresh && html`<div class="panel"><div class="panel-h"><h2>Get started</h2></div><div class="panel-b steps">
-        <div class=${(profiles.data || []).length ? 'done' : ''}><div><b>Create an auth profile and sign in</b><div class="small muted">Captures your Microsoft session (SSO + MFA supported). Skip for public "publish to web" links.</div></div><span class="spacer"></span><a class="btn sm" href="#/profiles">Auth profiles</a></div>
+        <div class=${(profiles.data || []).length ? 'done' : ''}><div><b>Connect a Power BI sign-in</b><div class="small muted">Captures your Microsoft session (SSO + MFA supported). Skip for public "publish to web" links.</div></div><span class="spacer"></span><a class="btn sm" href="#/profiles">Power BI sign-ins</a></div>
         <div class=${s.reports ? 'done' : ''}><div><b>Add your Power BI report links</b><div class="small muted">e.g. the DEV and PROD copies of the same report. Use "Discover" to verify each link.</div></div><span class="spacer"></span><a class="btn sm" href="#/reports">Report links</a></div>
         <div class=${s.suites ? 'done' : ''}><div><b>Create a test suite (A ⇄ B)</b><div class="small muted">Pick which scenarios to validate and the tolerances.</div></div><span class="spacer"></span><a class="btn sm" href="#/suites">Test suites</a></div>
         <div><div><b>Run it and review the differences</b><div class="small muted">Side-by-side screenshots, pixel diffs, outlined regions and data diffs for every scenario.</div></div></div>

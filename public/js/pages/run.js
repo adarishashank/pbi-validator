@@ -1,5 +1,5 @@
-import { html, useState, useEffect, useMemo, useRef, useCallback, api, go, fmtDate, fmtDur, runDuration, pct, setStore, STATUS_ORDER, STATUS_LABEL, SCENARIO_LABEL } from '../lib.js';
-import { Badge, Progress, Modal, act, confirmDialog, zoom, Spinner } from '../ui.js';
+import { html, useState, useEffect, useMemo, useRef, useCallback, api, go, downloadFile, fmtDate, fmtDur, runDuration, pct, setStore, STATUS_ORDER, STATUS_LABEL, SCENARIO_LABEL } from '../lib.js';
+import { Badge, Progress, Modal, Menu, act, confirmDialog, zoom, Spinner } from '../ui.js';
 import { Topbar } from './common.js';
 import { AiInsights, AiChat, VisionPanel } from './ai.js';
 
@@ -109,6 +109,24 @@ function ResultModal({ list, index, run, onClose, loadAi }) {
     <${ResultView} key=${r.id} r=${r} run=${run} ai=${ai} reloadAi=${reloadAi} /></${Modal}>`;
 }
 
+// ---------------------------------------------------------------- export
+const EXPORTS = {
+  pdf: { path: (id) => `/runs/${id}/report.pdf?download=1`, busy: 'Building the PDF report…' },
+  xlsx: { path: (id) => `/runs/${id}/export.xlsx`, busy: 'Building the Excel workbook…' },
+  zip: { path: (id) => `/runs/${id}/export.zip`, busy: 'Packing the HTML report…' },
+  json: { path: (id) => `/runs/${id}/export.json` },
+  junit: { path: (id) => `/runs/${id}/junit.xml` },
+};
+export const exportRun = (id, kind) => downloadFile(EXPORTS[kind].path(id), { busy: EXPORTS[kind].busy || 'Preparing download…' });
+const exportItems = (id) => [
+  { icon: '📄', label: 'PDF report', desc: 'Summary, AI analysis, issues with screenshots, all checks', onClick: () => exportRun(id, 'pdf') },
+  { icon: '📊', label: 'Excel workbook (.xlsx)', desc: 'Every check, AI findings and Q&A in sheets', onClick: () => exportRun(id, 'xlsx') },
+  { icon: '🌐', label: 'Interactive HTML (.zip)', desc: 'Offline report with all screenshots', onClick: () => exportRun(id, 'zip') },
+  'divider',
+  { icon: '{ }', label: 'JSON', desc: 'Raw data for scripts', onClick: () => exportRun(id, 'json') },
+  { icon: '✓', label: 'JUnit XML', desc: 'For CI test dashboards', onClick: () => exportRun(id, 'junit') },
+];
+
 // ------------------------------------------------------------------ page
 export function RunDetail({ id }) {
   const [run, setRun] = useState(null);
@@ -184,8 +202,8 @@ export function RunDetail({ id }) {
     <${Topbar} title=${html`Run #${run.id} · ${run.suite_name}`} sub=${html`<span class="row" style="gap:8px"><${Badge} s=${run.status} /><span>${run.trigger}${run.triggered_by ? ` by ${run.triggered_by}` : ''}</span><span>· started ${fmtDate(run.started_at || run.queued_at)}</span><span>· ${runDuration(run)}</span></span>`}>
       ${live && html`<button class="btn ed danger" onClick=${cancel}>Cancel</button>`}
       ${!live && run.suite_id && html`<button class="btn ed" onClick=${rerun}>↻ Re-run</button>`}
-      ${!live && html`<a class="btn" href=${`/api/runs/${id}/export.zip`}>⇩ HTML report (.zip)</a>
-        <a class="btn ghost" href=${`/api/runs/${id}/junit.xml`}>JUnit</a><a class="btn ghost" href=${`/api/runs/${id}/export.json`}>JSON</a>
+      ${!live && html`<button class="btn primary" onClick=${() => exportRun(id, 'pdf')}>⇩ Download PDF</button>
+        <${Menu} label="Export" items=${exportItems(id)} />
         <button class="btn ed ghost danger" onClick=${del}>Delete</button>`}
     </${Topbar}>
     <div class="content stack">
@@ -194,7 +212,7 @@ export function RunDetail({ id }) {
           ${reps.B && html`<span>⇄</span><span class="side-pill" title=${reps.B?.url}><b>B</b>${reps.B.name}${reps.B.environment ? ` · ${reps.B.environment}` : ''}</span>`}
           <span class="spacer"></span>${run.summary?.loadMs && html`<span class="small muted">Load: ${Object.entries(run.summary.loadMs).map(([k, v]) => `${k} ${fmtDur(v)}`).join(' · ')}</span>`}</div>
         ${live && html`<div><div class="row small" style="margin-bottom:6px"><${Spinner} /><b>${run.phase || 'Starting'}</b><span class="spacer"></span>${Math.round((run.progress || 0) * 100)}%</div><${Progress} value=${run.progress} /></div>`}
-        ${run.error && html`<div class="callout err">✖ <div>${run.error}${/sign-in|expired/i.test(run.error) ? html` — <a href="#/profiles">open Auth profiles</a>` : ''}</div></div>`}
+        ${run.error && html`<div class="callout err">✖ <div>${run.error}${/sign-in|expired/i.test(run.error) ? html` — <a href="#/profiles">open Power BI sign-ins</a>` : ''}</div></div>`}
         <div class="row">
           <span class="chip ${!f.status && !f.problems ? 'on' : ''}" onClick=${() => setF({ ...f, status: '', problems: false })}>All <span class="n">${results.length}</span></span>
           <span class="chip ${f.problems && !f.status ? 'on' : ''}" onClick=${() => setF({ ...f, status: '', problems: true })}>Problems <span class="n">${results.filter((r) => PROBLEM.has(r.status)).length}</span></span>

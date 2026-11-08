@@ -8,7 +8,7 @@ export { h, render, useState, useEffect, useRef, useCallback, useMemo };
 // ------------------------------------------------------------------ store
 const listeners = new Set();
 // me: undefined = still loading, null = signed out, else { user, method, roles, roleInfo }
-export const store = { toasts: [], modal: null, lightbox: null, me: undefined, authConfig: null };
+export const store = { toasts: [], modal: null, lightbox: null, me: undefined, authConfig: null, sessionExpired: false };
 export function setStore(patch) {
   Object.assign(store, typeof patch === 'function' ? patch(store) : patch);
   listeners.forEach((l) => l());
@@ -38,7 +38,7 @@ export async function api(path, { method = 'GET', body, raw } = {}) {
   if (raw) return res;
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
-  if (res.status === 401 && data?.loginRequired && store.me) setStore({ me: null, modal: null });
+  if (res.status === 401 && data?.loginRequired && store.me) setStore({ me: null, modal: null, sessionExpired: true });
   if (res.status === 403 && data?.passwordChangeRequired && store.me?.user) {
     setStore({ me: { ...store.me, user: { ...store.me.user, must_change_password: true } }, modal: null });
   }
@@ -80,8 +80,31 @@ export async function loadSession() {
 
 export async function signOut() {
   await api('/auth/logout', { method: 'POST' }).catch(() => {});
-  setStore({ me: null, modal: null });
+  setStore({ me: null, modal: null, sessionExpired: false });
   go('/login');
+}
+
+/**
+ * Downloads an API file (PDF, Excel, …) with progress and error toasts instead
+ * of navigating away. The filename comes from the server's Content-Disposition.
+ */
+export async function downloadFile(path, { busy = 'Preparing download…', fallbackName = 'download' } = {}) {
+  if (busy) toast(busy);
+  const res = await fetch(`/api${path}`, { credentials: 'same-origin' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    if (res.status === 401 && data?.loginRequired) setStore({ me: null, modal: null });
+    toast(data?.error || `Download failed (${res.status})`, 'err');
+    return false;
+  }
+  const blob = await res.blob();
+  const name = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '')?.[1] || fallbackName;
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  toast(`Downloaded ${name}`, 'ok');
+  return true;
 }
 
 export async function copyText(text, label = 'Copied') {

@@ -1,13 +1,14 @@
 import crypto from 'node:crypto';
 import { q, insert, update, nowIso } from '../db.js';
 import { config } from '../config.js';
+import { hashPassword, generatePassword } from './passwords.js';
 
 // ------------------------------------------------------------------ roles
 export const ROLES = ['viewer', 'editor', 'admin'];
 export const ROLE_INFO = {
   viewer: 'View reports, suites, runs and results; export; ask AI about runs',
-  editor: 'Everything a viewer can, plus manage report links, suites and auth profiles, and run validations',
-  admin: 'Everything an editor can, plus manage users, sign-in settings and the audit log',
+  editor: 'Everything a viewer can, plus manage report links, suites and Power BI sign-ins, and run validations',
+  admin: 'Everything an editor can, plus manage users, settings and the audit log',
 };
 export const hasRole = (user, role) => !!user && ROLES.indexOf(user.role) >= ROLES.indexOf(role);
 
@@ -17,10 +18,38 @@ const iso = (ms) => new Date(ms).toISOString();
 export const normEmail = (e) => String(e || '').trim().toLowerCase();
 
 // ------------------------------------------------------------------ users
+export const tempPasswordExpired = (u) => Boolean(u?.must_change_password && u.temp_password_expires_at && u.temp_password_expires_at < new Date().toISOString());
+
 export function publicUser(u) {
   if (!u) return null;
   const { password_hash: hash, ...rest } = u;
-  return { ...rest, has_password: Boolean(hash), disabled: Boolean(u.disabled), must_change_password: Boolean(u.must_change_password) };
+  return {
+    ...rest, has_password: Boolean(hash), disabled: Boolean(u.disabled), must_change_password: Boolean(u.must_change_password),
+    temp_password_expired: tempPasswordExpired(u),
+  };
+}
+
+/**
+ * Generates a temporary password for a user: replaces their password, forces a
+ * change at next sign-in, sets the expiry and signs them out everywhere.
+ * Returns the plain password (shown once, never stored) and when it expires.
+ */
+export async function issueTemporaryPassword(userId, { enable = false } = {}) {
+  const password = generatePassword();
+  const expiresAt = iso(Date.now() + config.auth.tempPasswordHours * 3600e3);
+  updateUser(userId, {
+    password_hash: await hashPassword(password), must_change_password: 1, temp_password_expires_at: expiresAt,
+    ...(enable ? { disabled: 0 } : {}),
+  });
+  revokeUserSessions(userId);
+  return { password, expiresAt, hours: config.auth.tempPasswordHours };
+}
+
+/** Creates an account with an automatically generated temporary password. */
+export async function inviteUser({ email, name = '', role = 'viewer' }) {
+  const user = createUser({ email, name, role, passwordHash: null, mustChange: true });
+  const temp = await issueTemporaryPassword(user.id);
+  return { user: getUser(user.id), ...temp };
 }
 
 export const userCount = () => q.get('SELECT COUNT(*) n FROM users').n;
@@ -28,11 +57,11 @@ export const getUser = (id) => q.get('SELECT * FROM users WHERE id = ?', id);
 export const findUserByEmail = (email) => q.get('SELECT * FROM users WHERE email = ?', normEmail(email));
 export const otherActiveAdmins = (userId) => q.get("SELECT COUNT(*) n FROM users WHERE role = 'admin' AND disabled = 0 AND id != ?", userId).n;
 
-export function createUser({ email, name = '', role = 'viewer', provider = 'local', passwordHash = null, msOid = null, msTid = null, mustChange = false }) {
+export function createUser({ email, name = '', role = 'viewer', passwordHash = null, mustChange = false }) {
   const now = nowIso();
   const id = insert('users', {
-    email: normEmail(email), name: String(name).trim(), role, provider, password_hash: passwordHash,
-    ms_oid: msOid, ms_tid: msTid, must_change_password: mustChange ? 1 : 0, created_at: now, updated_at: now,
+    email: normEmail(email), name: String(name).trim(), role, provider: 'local', password_hash: passwordHash,
+    must_change_password: mustChange ? 1 : 0, created_at: now, updated_at: now,
   });
   return getUser(id);
 }
@@ -127,45 +156,20 @@ export function setSetting(key, value) {
   q.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, JSON.stringify(value));
 }
 
-const AUTH_DEFAULTS = {
-  localLogin: true,
-  publicUrl: '',
-  microsoft: {
-    enabled: null, tenant: '', clientId: '', clientSecret: '', buttonLabel: '',
-    allowedDomains: [], allowedTenants: [], autoProvision: true, defaultRole: 'viewer',
-  },
-};
-
-/** Effective sign-in settings: stored values, overridden by environment variables. */
+/** Effective site settings: stored values, overridden by environment variables. */
 export function authSettings() {
   const stored = getSetting('auth', {}) || {};
   const env = config.auth;
-  const ms = { ...AUTH_DEFAULTS.microsoft, ...(stored.microsoft || {}) };
-  const locked = { tenant: Boolean(env.msTenant), clientId: Boolean(env.msClientId), clientSecret: Boolean(env.msClientSecret), publicUrl: Boolean(env.publicUrl) };
-  if (env.msTenant) ms.tenant = env.msTenant;
-  if (env.msClientId) ms.clientId = env.msClientId;
-  if (env.msClientSecret) ms.clientSecret = env.msClientSecret;
-  if (ms.enabled === null) ms.enabled = Boolean(env.msClientId);
-  ms.tenant = String(ms.tenant || '').trim().toLowerCase();
-  ms.allowedDomains = (ms.allowedDomains || []).map(normEmail).filter(Boolean);
-  ms.allowedTenants = (ms.allowedTenants || []).map((t) => String(t).trim().toLowerCase()).filter(Boolean);
-  if (!['viewer', 'editor'].includes(ms.defaultRole)) ms.defaultRole = 'viewer';
   return {
-    localLogin: stored.localLogin ?? AUTH_DEFAULTS.localLogin,
     publicUrl: (env.publicUrl || stored.publicUrl || '').replace(/\/+$/, ''),
-    microsoft: ms,
-    locked,
+    locked: { publicUrl: Boolean(env.publicUrl) },
   };
 }
 
 export function saveAuthSettings(patch) {
   const stored = getSetting('auth', {}) || {};
-  const next = { ...stored, ...patch, microsoft: { ...(stored.microsoft || {}), ...(patch.microsoft || {}) } };
-  // An empty secret in a save means "keep the current one".
-  if (patch.microsoft && !patch.microsoft.clientSecret) next.microsoft.clientSecret = stored.microsoft?.clientSecret || '';
-  if (patch.microsoft?.clearSecret) next.microsoft.clientSecret = '';
-  delete next.microsoft.clearSecret;
-  setSetting('auth', next);
+  // Only keep known keys (older versions also stored Microsoft sign-in settings here).
+  setSetting('auth', { publicUrl: patch.publicUrl ?? stored.publicUrl ?? '' });
   return authSettings();
 }
 

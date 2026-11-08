@@ -41,9 +41,11 @@ async function runSuite(name, urlA, urlB, cfg = {}) {
 }
 
 const find = (rs, scenario, pred = () => true) => rs.filter((r) => r.scenario === scenario && pred(r));
+let regressionRunId;
 
 test('A vs B: every scenario detects the planted regressions', { timeout: 600000 }, async () => {
   const { runId, status, results } = await runSuite('regressions', `${base}?v=a`, `${base}?v=b`);
+  regressionRunId = runId;
   const dump = () => results.map((r) => `${r.status.padEnd(7)} ${r.scenario.padEnd(13)} ${r.page} :: ${r.title}`).join('\n');
   assert.equal(status, 'failed', dump());
 
@@ -102,4 +104,29 @@ test('A vs A: identical reports produce no differences (no false positives)', { 
   assert.deepEqual(bad.map((r) => `${r.status} ${r.scenario} ${r.title} ${JSON.stringify(r.details).slice(0, 300)}`), []);
   assert.equal(status, 'passed');
   assert.ok(results.length > 20, `expected a full scenario sweep, got ${results.length}`);
+});
+
+test('exports: PDF report and Excel workbook are built from a real run', { timeout: 120000 }, async () => {
+  assert.ok(regressionRunId, 'needs the regression run');
+  const { loadRunBundle } = await import('../src/jobs/export.js');
+  const { renderRunPdf, runSheets, reportHtml } = await import('../src/jobs/report.js');
+  const { xlsxBuffer } = await import('../src/jobs/xlsx.js');
+  const bundle = loadRunBundle(regressionRunId);
+
+  const htmlDoc = reportHtml(bundle);
+  assert.match(htmlDoc, /Checks needing attention/);
+  assert.match(htmlDoc, /Go to Details/);
+  assert.match(htmlDoc, /<img src="/, 'problem screenshots embedded');
+
+  const pdf = await renderRunPdf(bundle);
+  assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+  assert.ok(pdf.length > 20_000, `PDF has content (${pdf.length} bytes)`);
+  assert.ok(!fs.readdirSync(path.join(tmp, 'runs', String(regressionRunId))).some((f) => f.startsWith('.print-')), 'temp print file cleaned up');
+
+  const sheets = runSheets(bundle);
+  assert.deepEqual(sheets.map((s) => s.name), ['Summary', 'Checks']);
+  assert.equal(sheets[1].rows.length, bundle.results.length);
+  const xlsx = await xlsxBuffer(sheets);
+  assert.equal(xlsx.subarray(0, 2).toString(), 'PK', 'xlsx is a zip');
+  assert.ok(xlsx.includes(Buffer.from('xl/worksheets/sheet2.xml')));
 });

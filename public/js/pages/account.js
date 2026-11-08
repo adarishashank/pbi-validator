@@ -14,10 +14,9 @@ export function deviceLabel(ua = '') {
 
 export function SessionsTable({ sessions, onRevoke }) {
   if (!sessions?.length) return html`<p class="muted" style="margin:0">No active sessions.</p>`;
-  return html`<table class="t"><thead><tr><th>Device</th><th>Signed in with</th><th>IP address</th><th>Signed in</th><th>Last active</th><th></th></tr></thead><tbody>
+  return html`<table class="t"><thead><tr><th>Device</th><th>IP address</th><th>Signed in</th><th>Last active</th><th></th></tr></thead><tbody>
     ${sessions.map((x) => html`<tr>
       <td><b>${deviceLabel(x.user_agent)}</b>${x.current && html` <span class="badge b-pass">This device</span>`}</td>
-      <td>${x.method === 'microsoft' ? 'Microsoft' : 'Password'}</td>
       <td class="mono">${x.ip || '—'}</td><td class="muted">${fmtDate(x.created_at)}</td><td class="muted">${fmtAgo(x.last_seen_at)}</td>
       <td style="text-align:right">${onRevoke && !x.current && html`<button class="btn sm ghost danger" onClick=${() => onRevoke(x)}>Sign out</button>`}</td></tr>`)}
   </tbody></table>`;
@@ -84,15 +83,13 @@ export function Account() {
           <dl class="kv">
             <dt>Email</dt><dd><b>${me.email}</b></dd>
             <dt>Role</dt><dd><${RoleBadge} role=${me.role} /> <span class="small muted">${s.me?.roleInfo?.[me.role]}</span></dd>
-            <dt>Sign-in</dt><dd>${me.ms_oid ? 'Microsoft account' : ''}${me.ms_oid && me.has_password ? ' · ' : ''}${me.has_password ? 'Password' : ''}</dd>
+            <dt>Last sign-in</dt><dd>${me.last_login_at ? fmtDate(me.last_login_at) : '—'}</dd>
             <dt>Member since</dt><dd>${fmtDate(me.created_at)}</dd>
           </dl>
           <${Field} label="Display name"><div class="row" style="flex-wrap:nowrap"><input type="text" value=${name} onInput=${(e) => setName(e.target.value)} /><button class="btn" disabled=${name === (me.name || '')} onClick=${saveName}>Save</button></div></${Field}>
         </div></div>
         <div class="panel"><div class="panel-h"><h3>Password</h3></div><div class="panel-b">
-          ${me.has_password
-            ? html`<${PasswordForm} email=${me.email} minLength=${s.authConfig?.passwordMinLength || 10} onDone=${(r) => { toast(`Password changed${r?.otherSessionsSignedOut ? `; ${r.otherSessionsSignedOut} other session(s) signed out` : ''}`, 'ok'); sessions.reload(); }} />`
-            : html`<p class="muted" style="margin:0">You sign in with your Microsoft account, so there's no password to manage here. Your organisation's Microsoft policies (MFA, password rules) apply.</p>`}
+          <${PasswordForm} email=${me.email} minLength=${s.authConfig?.passwordMinLength || 10} onDone=${(r) => { toast(`Password changed${r?.otherSessionsSignedOut ? `; ${r.otherSessionsSignedOut} other session(s) signed out` : ''}`, 'ok'); sessions.reload(); }} />
         </div></div>
       </div>
 

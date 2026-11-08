@@ -155,8 +155,8 @@ export function Suites() {
           <div class="vs"><span class="side-pill" title=${a?.url}><b>A</b>${a?.name || '?'}${a?.environment ? ` · ${a.environment}` : ''}</span>
             ${s.mode === 'compare' && html`<span>⇄</span><span class="side-pill" title=${b?.url}><b>B</b>${b?.name || '?'}${b?.environment ? ` · ${b.environment}` : ''}</span>`}</div>
           <div class="row small muted">
-            ${Object.entries(s.config.scenarios).filter(([, v]) => v).length}/9 scenarios ·
-            ${s.schedule ? html`<span>⏱ <code>${s.schedule}</code> next ${fmtDate(s.next_run)}</span>` : 'manual / CI'}
+            <span>${Object.entries(s.config.scenarios).filter(([, v]) => v).length} of 9 checks enabled</span><span>·</span>
+            ${s.schedule ? html`<span>⏱ <code>${s.schedule}</code> next ${fmtDate(s.next_run)}</span>` : html`<span>Runs on demand</span>`}
           </div>
           ${lr && html`<div class="row small"><a href=${`#/runs/${lr.id}`}>Last run #${lr.id}</a><span class="muted">${fmtAgo(lr.finished_at)}</span><${SummaryChips} byStatus=${lr.summary?.byStatus} /></div>`}
           <div class="row" style="margin-top:4px">

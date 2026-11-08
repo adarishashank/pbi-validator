@@ -11,7 +11,7 @@ export function loadRunBundle(runId) {
   const results = q.all('SELECT * FROM results WHERE run_id = ? ORDER BY seq', runId);
   const logs = q.all('SELECT ts, level, message FROM run_logs WHERE run_id = ? ORDER BY id', runId);
   const ai = getRunAi(runId);
-  return { run, results, logs, ai: { summary: ai.summary, anomalies: ai.anomalies, vision: ai.vision } };
+  return { run, results, logs, ai: { summary: ai.summary, anomalies: ai.anomalies, vision: ai.vision, chat: ai.chat } };
 }
 
 const xmlEsc = (s) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));

@@ -29,18 +29,18 @@ Run status: **passed**, **diffs** (only visual/data differences), **failed** (fa
 
 | Feature | Details |
 |---|---|
-| **Sign in with Microsoft** | Microsoft Entra ID single sign-on (OpenID Connect + PKCE; ID-token signature, issuer, audience, nonce and tenant verified). MFA and conditional access apply. Restrict by tenant and email domain; auto-create accounts with a default role, or invite-only. |
-| **Email + password** | scrypt-hashed passwords, minimum length and common-password checks, one-time passwords for new users and resets (must be changed at first sign-in), sign-in throttling. Can be turned off to require Microsoft. |
-| **Roles** | **Viewer**: read everything, export, ask AI. **Editor**: also manage report links, suites, auth profiles and run validations. **Admin**: also users, sign-in settings, audit log. Enforced by the server on every request; viewers don't see edit buttons. |
-| **Admin panel** | *Users* (add, change role, disable, reset password, sign out everywhere, delete, with last-admin protection) · *Sign-in* (Microsoft setup guide with the exact redirect URI, connection test, password sign-in toggle, public URL) · *Audit log* (every sign-in, failure and change, with user, IP and result; filterable) · *System* (health, storage, sessions, AI status). |
+| **Sign-in page** | Email + password, show/hide password, Caps Lock warning, "Keep me signed in" (untick for a browser-session cookie on shared computers), "Forgot password?" help, clear message when a session expires. |
+| **Passwords** | scrypt-hashed, minimum length and common-password checks with a live checklist and strength meter, automatically generated expiring temporary passwords for new users and resets (must be changed at first sign-in), sign-in throttling. |
+| **Roles** | **Viewer**: read everything, export, ask AI. **Editor**: also manage report links, suites, Power BI sign-ins and run validations. **Admin**: also users, settings, audit log. Enforced by the server on every request; viewers don't see edit buttons. |
+| **Admin panel** | *Users* (add, change role, disable, reset password, sign out everywhere, delete, with last-admin protection) · *Settings* (public URL, sign-in security overview) · *Audit log* (every sign-in, failure and change, with user, IP and result; filterable) · *System* (health, storage, sessions, AI status). |
 | **My account** | Change password, see and sign out other devices, create personal **API keys** (`Authorization: Bearer pbiv_…`) for CI with an expiry. |
 | **Security** | HttpOnly SameSite session cookies (Secure over HTTPS), idle and absolute session expiry, origin checks on all writes, HSTS behind HTTPS, private caching for screenshots, secrets never returned or logged. |
 
 **First run:** open `http://127.0.0.1:4400` *on the machine running the validator* to create the first administrator (or `npm run cli -- create-admin you@company.com`). From another machine, the setup page asks for the `API_TOKEN` as a setup token.
 
-**Microsoft sign-in setup:** Admin → Sign-in shows a step-by-step guide. In short: register an app in the [Entra admin center](https://entra.microsoft.com) (single tenant, *Web* redirect URI shown on the page), then paste the client ID, tenant ID and a client secret. If you serve the app through Cloudflare or a custom domain, set **Public URL** first so the redirect URI matches.
+**Adding people:** Admin → Users → *Add user*. A readable temporary password (e.g. `Kp7m-Wq4x-Hr9t-Bz3c`, no look-alike characters) is **generated automatically**, shown once with a *Copy sign-in instructions* button, and expires after `TEMP_PASSWORD_HOURS` (72 h). The person must choose their own password at first sign-in. Expired or forgotten? *New temporary password* / *Reset password* on the same page.
 
-CLI: `npm run cli -- users`, `create-admin <email>`, `reset-password <email>`. The `API_TOKEN` still works as an admin Bearer token for scripts.
+CLI: `npm run cli -- add-user <email> --role viewer|editor|admin`, `create-admin <email>`, `reset-password <email>` (each prints an automatically generated temporary password and its expiry), `users`. The `API_TOKEN` still works as an admin Bearer token for scripts.
 
 ## AI analysis (NVIDIA open models)
 
@@ -53,7 +53,7 @@ With a free [NVIDIA API key](https://build.nvidia.com) in `.env` (`NVIDIA_API_KE
 | **Screenshot explanations**: a vision model compares the A/B screenshots of the top differences and describes what visibly changed, flagging likely rendering noise | `nvidia/nemotron-3.5-super-vl-120b-a12b` | Each result → **AI screenshot analysis** |
 | **Ask AI**: chat with a run ("Which slicer values broke?", "Is the total difference real or rounding?"), with answers citing `#check` numbers you can click | text model | Run → **Ask AI** |
 
-AI output is included in the exported HTML report. It never changes a run's pass/fail verdict; the deterministic checks stay the source of truth.
+AI output is included in the PDF, Excel and HTML exports. It never changes a run's pass/fail verdict; the deterministic checks stay the source of truth.
 
 **Data privacy:** the hosted NVIDIA endpoint receives run digests, extracted values and (for screenshot explanations) cropped screenshots. For confidential reports, either set `AI_ALLOW_IMAGES=false`, disable AI per suite, or set `AI_BASE_URL` to a **self-hosted NVIDIA NIM** (any OpenAI-compatible server such as NIM, vLLM or Ollama works) so nothing leaves your network.
 
@@ -65,10 +65,10 @@ npx playwright install chromium
 npm start                         # http://127.0.0.1:4400
 ```
 
-1. **Auth profiles** → *New profile* → *Sign in*. A real browser window opens; complete SSO/MFA there and the session is captured. Tick "Stay signed in". Public *publish-to-web* links need no profile. Use separate profiles if A and B live in different tenants.
+1. **Power BI sign-ins** → *New sign-in* → *Sign in*. A real browser window opens; complete SSO/MFA there and the session is captured. Tick "Stay signed in". Public *publish-to-web* links need no profile. Use separate profiles if A and B live in different tenants.
 2. **Report links** → add each report URL and pick its profile. Click **Discover** to confirm the link opens and see every page with its visual counts.
 3. **Test suites** → *New suite* → choose A and B, the scenarios, limits and tolerances.
-4. **Run now** → watch it live, then review results (filter by status, scenario or page; press ← → to step through differences). Export as a **standalone HTML report (.zip)**, **JUnit XML** or **JSON**.
+4. **Run now** → watch it live, then review results (filter by status, scenario or page; press ← → to step through differences). **Download PDF** for a shareable report (summary, AI analysis, every issue with screenshots, appendix of all checks), or use **Export** for an **Excel workbook (.xlsx)**, a **standalone HTML report (.zip)**, **JSON** or **JUnit XML**. The Runs page exports the run list to Excel and has a PDF button per run.
 
 Supported URL types: service reports (`app.powerbi.com/groups/…/reports/…`), app reports, `reportEmbed` links, publish-to-web (`view?r=…`), and pages that host a report in an iframe (the report frame is detected).
 
@@ -100,18 +100,18 @@ The validator needs a real browser, disk storage and a sign-in window, so it run
 | Keep it running on this Mac | `./scripts/macos/install-service.sh` + `sudo cloudflared service install` | starts at login, restarts on crash |
 | Cloud VM | `docker compose up -d` (see `docker-compose.yml`) | app + cloudflared containers; sign in on a workstation and **Import** the session |
 
-Create the administrator account (locally) and set `API_TOKEN` before exposing the app: it holds Power BI sessions. For Microsoft sign-in through the tunnel, set **Public URL** (Admin → Sign-in) to the tunnel address and register that redirect URI in Entra; a permanent named tunnel avoids re-registering. Cloudflare Access can be added in front as a second layer.
+Create the administrator account (locally) and set `API_TOKEN` before exposing the app: it holds Power BI sessions. If people use a permanent address, set it as **Public URL** (Admin → Settings). Cloudflare Access can be added in front as a second layer.
 
 ## Production deployment
 * **Configuration**: `.env` (see `.env.example`). Binds to `127.0.0.1` by default. Everyone signs in with their own account (see *Accounts*); CI uses a personal API key or `API_TOKEN` as `Authorization: Bearer <token>`.
-* **Docker**: `docker build -t pbi-validator . && docker run -p 4400:4400 -v pbi-data:/data -e API_TOKEN=… pbi-validator`. Containers have no display, so sign in on a workstation (`npm run login -- "<profile>"`) and use **Import** on the Auth profiles page.
+* **Docker**: `docker build -t pbi-validator . && docker run -p 4400:4400 -v pbi-data:/data -e API_TOKEN=… pbi-validator`. Containers have no display, so sign in on a workstation (`npm run login -- "<profile>"`) and use **Import** on the Power BI sign-ins page.
 * **Data**: SQLite (WAL) plus PNG artifacts in `DATA_DIR`. Runs older than `RUN_RETENTION_DAYS` are purged nightly. Session files are written with `0600` permissions and refreshed after each successful run. Treat `DATA_DIR/auth` as a secret.
 * **Robustness**: runs are snapshotted (later edits don't change history), queued (`MAX_PARALLEL_RUNS`), cancellable, and marked as interrupted if the server restarts. Sessions that hit the Microsoft login page fail fast with a clear "sign in again" message, and the profile is flagged.
 * **Security**: CSP, `X-Frame-Options`, `nosniff`, `no-referrer`; inputs validated with zod; report URLs with `?r=` tokens are redacted in logs.
 
 ## Development
 ```bash
-npm test          # unit tests + end-to-end tests against a local Power BI DOM replica
+npm test          # unit, API, engine and whole-website browser tests (setup → users → run → PDF/Excel) against a local Power BI DOM replica
 npm run dev       # auto-restart on changes
 ```
 `test/fixtures/mock-report.html` reproduces the Power BI renderer's DOM contract. Its variant `?v=b` contains planted regressions; the e2e suite asserts every scenario catches them and that an A-vs-A run has zero false positives.
@@ -119,8 +119,8 @@ npm run dev       # auto-restart on changes
 ```
 src/engine/   pbi.js (report driver) · runner.js (scenarios) · compare.js (pixel + data diff)
               matcher.js (page/visual matching) · inpage.js (in-browser extraction) · selectors.js
-src/jobs/     queue.js · scheduler.js · discovery.js · export.js (HTML/JUnit/JSON)
-src/auth/     profiles.js (Power BI sessions) · users.js · passwords.js · microsoft.js (Entra OIDC) · middleware.js (roles, CSRF, audit)
+src/jobs/     queue.js · scheduler.js · discovery.js · export.js (HTML/JUnit/JSON) · report.js (PDF + Excel) · xlsx.js
+src/auth/     profiles.js (Power BI sessions) · users.js · passwords.js · middleware.js (roles, CSRF, audit)
 src/api/      routes.js (REST + SSE) · auth.js · admin.js      public/   Preact + htm UI (no build step)
 ```
 

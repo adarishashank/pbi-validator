@@ -47,5 +47,19 @@ export function passwordProblem(password, { email = '' } = {}) {
   return null;
 }
 
-/** Random temporary password (user must change it at first sign-in). */
-export const generatePassword = () => `${crypto.randomBytes(9).toString('base64url')}-${crypto.randomBytes(6).toString('base64url')}`;
+// No look-alike characters (0/O, 1/l/I), so a temporary password can be read out or retyped.
+const TEMP_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+
+/**
+ * Random temporary password in four groups, e.g. "Kp7m-Wq4x-Hr9t-Bz3c"
+ * (16 characters from 57 ≈ 93 bits). Users must replace it at first sign-in.
+ */
+export function generatePassword() {
+  const groups = [];
+  for (let g = 0; g < 4; g++) {
+    let s = '';
+    for (let i = 0; i < 4; i++) s += TEMP_ALPHABET[crypto.randomInt(TEMP_ALPHABET.length)];
+    groups.push(s);
+  }
+  return groups.join('-');
+}

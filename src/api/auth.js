@@ -5,13 +5,12 @@ import { config } from '../config.js';
 import { createLogger } from '../logger.js';
 import {
   ROLES, ROLE_INFO, publicUser, userCount, getUser, findUserByEmail, createUser, updateUser, createSession, deleteSession,
-  revokeUserSessions, listSessions, deleteSessionByPrefix, createApiKey, listApiKeys, audit, authSettings,
-  loginBlocked, recordLoginFailure, clearLoginFailures, normEmail,
+  revokeUserSessions, listSessions, deleteSessionByPrefix, createApiKey, listApiKeys, audit,
+  loginBlocked, recordLoginFailure, clearLoginFailures, normEmail, tempPasswordExpired,
 } from '../auth/users.js';
 import { hashPassword, verifyPassword, passwordProblem } from '../auth/passwords.js';
-import { microsoftProblem, beginLogin, completeLogin, claimsEmail } from '../auth/microsoft.js';
 import {
-  setSessionCookie, clearSessionCookie, isLocalRequest, isApiToken, publicOrigin, resolvePrincipal,
+  setSessionCookie, clearSessionCookie, isLocalRequest, isApiToken, resolvePrincipal,
 } from '../auth/middleware.js';
 
 const logger = createLogger('auth');
@@ -35,15 +34,15 @@ export const meOut = (user, method) => ({
 export const authApi = express.Router();
 
 authApi.get('/auth/config', (req, res) => {
-  const s = authSettings();
   const setupRequired = userCount() === 0;
   res.json({
     setupRequired,
     setupNeedsToken: setupRequired && !isLocalRequest(req),
     setupPossible: !setupRequired || isLocalRequest(req) || Boolean(config.apiToken),
-    localLogin: s.localLogin,
-    microsoft: { enabled: !microsoftProblem(s.microsoft), label: s.microsoft.buttonLabel || 'Sign in with Microsoft' },
     passwordMinLength: config.auth.passwordMinLength,
+    sessionIdleHours: config.auth.sessionIdleHours,
+    tempPasswordHours: config.auth.tempPasswordHours,
+    version: config.version,
   });
 });
 
@@ -71,10 +70,13 @@ authApi.post('/auth/setup', wrap(async (req, res) => {
   res.status(201).json(meOut(getUser(user.id), 'session'));
 }));
 
-const LoginSchema = z.object({ email: z.string().trim().max(254), password: z.string().max(500) });
+const LoginSchema = z.object({
+  email: z.string().trim().min(1, 'Enter your email address').max(254),
+  password: z.string().min(1, 'Enter your password').max(500),
+  remember: z.boolean().optional().default(true),
+});
 authApi.post('/auth/login', wrap(async (req, res) => {
   const d = parse(LoginSchema, req.body);
-  if (!authSettings().localLogin) throw httpError(403, 'Password sign-in is turned off. Use Microsoft sign-in.');
   const wait = loginBlocked(req.ip, d.email);
   if (wait) {
     audit(normEmail(d.email), 'login.blocked', { status: 429, ip: req.ip });
@@ -91,8 +93,12 @@ authApi.post('/auth/login', wrap(async (req, res) => {
     audit(user, 'login.failed', { status: 403, ip: req.ip, detail: { reason: 'disabled' } });
     throw httpError(403, 'Your account is disabled. Contact an administrator.');
   }
+  if (tempPasswordExpired(user)) {
+    audit(user, 'login.failed', { status: 403, ip: req.ip, detail: { reason: 'temporary_password_expired' } });
+    throw httpError(403, 'Your temporary password has expired. Ask an administrator to generate a new one (Admin → Users → New temporary password).', { tempPasswordExpired: true });
+  }
   clearLoginFailures(req.ip, d.email);
-  setSessionCookie(req, res, createSession(user, req, 'password'));
+  setSessionCookie(req, res, createSession(user, req, 'password'), { persistent: d.remember });
   audit(user, 'login.success', { ip: req.ip, detail: { method: 'password' } });
   res.json(meOut(getUser(user.id), 'session'));
 }));
@@ -118,11 +124,10 @@ authApi.post('/auth/password', wrap(async (req, res) => {
   if (user.password_hash && !user.must_change_password && !(await verifyPassword(d.current, user.password_hash))) {
     throw httpError(400, 'Current password is incorrect');
   }
-  if (!user.password_hash && user.provider === 'microsoft') throw httpError(400, 'This account signs in with Microsoft and has no password');
   const problem = passwordProblem(d.next, { email: user.email });
   if (problem) throw httpError(400, problem);
   if (user.password_hash && await verifyPassword(d.next, user.password_hash)) throw httpError(400, 'Choose a password different from the current one');
-  updateUser(user.id, { password_hash: await hashPassword(d.next), must_change_password: 0 });
+  updateUser(user.id, { password_hash: await hashPassword(d.next), must_change_password: 0, temp_password_expires_at: null });
   const revoked = revokeUserSessions(user.id, req.sessionId || '');
   res.json({ ok: true, otherSessionsSignedOut: revoked });
 }));
@@ -161,60 +166,4 @@ authApi.delete('/auth/api-keys/:id', wrap((req, res) => {
   const r = q.run('DELETE FROM api_keys WHERE id = ? AND user_id = ?', Number(req.params.id), req.user.id ?? -1);
   if (!Number(r.changes)) throw httpError(404, 'API key not found');
   res.status(204).end();
-}));
-
-// ======================================================= /auth/microsoft (browser)
-export const browserAuth = express.Router();
-
-const safeReturnTo = (v) => (typeof v === 'string' && /^\/(?!\/)[\w\-./#?=&%]*$/.test(v) ? v : '/');
-const loginErrorRedirect = (res, message) => res.redirect(302, `/#/login?error=${encodeURIComponent(message)}`);
-export const redirectUri = (req) => `${publicOrigin(req)}/auth/microsoft/callback`;
-
-browserAuth.get('/auth/microsoft/login', wrap(async (req, res) => {
-  try {
-    res.redirect(302, await beginLogin({ redirectUri: redirectUri(req), returnTo: safeReturnTo(req.query.returnTo) }));
-  } catch (e) {
-    loginErrorRedirect(res, e.message);
-  }
-}));
-
-/** Finds or creates the local user for verified Microsoft claims. */
-export function userForMicrosoft(claims, req) {
-  const ms = authSettings().microsoft;
-  const email = claimsEmail(claims);
-  const tid = String(claims.tid).toLowerCase();
-  if (!email.includes('@')) throw httpError(403, 'Your Microsoft account has no email address');
-  const domain = email.split('@')[1];
-  if (ms.allowedDomains.length && !ms.allowedDomains.includes(domain)) throw httpError(403, `Accounts from ${domain} are not allowed to sign in here`);
-
-  let user = q.get('SELECT * FROM users WHERE ms_oid = ? AND ms_tid = ?', claims.oid, tid);
-  if (!user) {
-    const existing = findUserByEmail(email);
-    if (existing) {
-      if (existing.ms_oid) throw httpError(403, `${email} is already linked to a different Microsoft account`);
-      // Safe to link by email: sign-in is restricted to a specific tenant (see microsoftProblem).
-      user = updateUser(existing.id, { ms_oid: claims.oid, ms_tid: tid, name: existing.name || claims.name || '' });
-      audit(user, 'user.link_microsoft', { target: email, ip: req.ip });
-    } else if (ms.autoProvision) {
-      user = createUser({ email, name: claims.name || '', role: ms.defaultRole, provider: 'microsoft', msOid: claims.oid, msTid: tid });
-      audit(user, 'user.auto_provision', { target: email, ip: req.ip, detail: { role: user.role } });
-    } else {
-      throw httpError(403, `There's no account for ${email}. Ask an administrator to add you.`);
-    }
-  }
-  if (user.disabled) throw httpError(403, 'Your account is disabled. Contact an administrator.');
-  return user;
-}
-
-browserAuth.get('/auth/microsoft/callback', wrap(async (req, res) => {
-  try {
-    const { claims, returnTo } = await completeLogin(req.query);
-    const user = userForMicrosoft(claims, req);
-    setSessionCookie(req, res, createSession(user, req, 'microsoft'));
-    audit(user, 'login.success', { ip: req.ip, detail: { method: 'microsoft', tenant: claims.tid } });
-    res.redirect(302, returnTo);
-  } catch (e) {
-    audit(null, 'login.failed', { status: e.status || 401, ip: req.ip, detail: { method: 'microsoft', reason: e.message } });
-    loginErrorRedirect(res, e.message);
-  }
 }));

@@ -1,4 +1,4 @@
-import { html, useState, useRef, useEffect, api } from '../lib.js';
+import { html, useState, useRef, useEffect, api, downloadFile } from '../lib.js';
 import { Badge, Spinner, act } from '../ui.js';
 
 const SEV = { critical: 'fail', high: 'fail', medium: 'diff', low: 'warn', info: 'skipped', none: 'pass' };
@@ -57,6 +57,8 @@ export function AiInsights({ run, ai, onOpenRef, reload }) {
   return html`<div class="stack">
     <div class="row">
       <span class="muted small">Models: <code>${st.textModel}</code> · vision <code>${st.visionModel}</code> · ${st.provider}</span><span class="spacer"></span>
+      ${S && !running && html`<button class="btn sm" onClick=${() => downloadFile(`/runs/${run.id}/report.pdf?download=1`, { busy: 'Building the PDF report…' })}>⇩ Download as PDF</button>
+        <button class="btn sm ghost" onClick=${() => downloadFile(`/runs/${run.id}/export.xlsx`, { busy: 'Building the Excel workbook…' })}>⇩ Excel</button>`}
       ${running ? html`<span class="row small"><${Spinner} /> Analysing…</span>` : html`<button class="btn ed sm" disabled=${live} onClick=${analyze}>${S ? '↻ Re-analyse' : '🤖 Analyse with AI'}</button>`}
     </div>
     ${!S && !running && !ai.summary?.error && html`<div class="panel"><div class="empty"><h3>No AI analysis yet</h3>${live ? 'It starts automatically when the run finishes.' : 'Click “Analyse with AI” for an executive summary, root-cause triage, data-anomaly review and screenshot explanations.'}</div></div>`}
