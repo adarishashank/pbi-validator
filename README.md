@@ -2,6 +2,8 @@
 
 A self-hosted website for **end-to-end validation of Power BI reports**. Add report links, pair them in a test suite (e.g. **DEV ⇄ PROD**, or before/after a dataset change), and a headless Chromium validates both reports scenario by scenario. Every difference comes with screenshots (A, B, pixel diff, and B with the differing regions outlined) plus a data diff.
 
+> **User guide:** [docs/USER-GUIDE.md](docs/USER-GUIDE.md): onboarding, plus how-to for viewers and editors (also as [Word](docs/PBI-Report-Test-User-Guide.docx) and [PDF](docs/PBI-Report-Test-User-Guide.pdf)). The Markdown and Word versions are generated from one source: `npm --prefix docs/guide-source install && node docs/guide-source/build.js` (save the Word file as PDF for the PDF copy).
+
 ## What gets validated
 
 | Scenario | What happens | Flags |

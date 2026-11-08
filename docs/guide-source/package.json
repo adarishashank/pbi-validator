@@ -1,0 +1,7 @@
+{
+  "name": "pbireporttest-user-guide",
+  "private": true,
+  "description": "Builds docs/USER-GUIDE.md and the Word user guide from one source",
+  "scripts": { "build": "node build.js" },
+  "dependencies": { "docx": "^9.5.1" }
+}
