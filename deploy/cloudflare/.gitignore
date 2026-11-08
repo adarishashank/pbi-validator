@@ -3,3 +3,4 @@ node_modules/
 .dev.vars
 .r2-credentials
 .api-token
+.cf-api-token
