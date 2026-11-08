@@ -1,4 +1,4 @@
-# Power BI Validator
+# PBI Report Test
 
 A self-hosted website for **end-to-end validation of Power BI reports**. Add report links, pair them in a test suite (e.g. **DEV ⇄ PROD**, or before/after a dataset change), and a headless Chromium validates both reports scenario by scenario. Every difference comes with screenshots (A, B, pixel diff, and B with the differing regions outlined) plus a data diff.
 
@@ -95,6 +95,7 @@ The validator needs a real browser, disk storage and a sign-in window, so it run
 
 | Option | Command | Result |
 |---|---|---|
+| **Free cloud server (recommended)** | [`deploy/oracle/README.md`](deploy/oracle/README.md): Oracle Cloud Always Free + one-command `install.sh` | `https://pbireporttest.duckdns.org`, always on, HTTPS, nightly backups |
 | Instant link (testing) | `./scripts/cloudflare/quick-tunnel.sh` | `https://<random>.trycloudflare.com`; changes on every start; requires `API_TOKEN` |
 | Permanent, on your domain | `./scripts/cloudflare/setup-named-tunnel.sh pbi.example.com` then `cloudflared tunnel run pbi-validator` | `https://pbi.example.com`; needs the domain's DNS on Cloudflare |
 | Keep it running on this Mac | `./scripts/macos/install-service.sh` + `sudo cloudflared service install` | starts at login, restarts on crash |

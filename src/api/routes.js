@@ -253,7 +253,7 @@ const stamp = () => new Date().toISOString().slice(0, 10);
 router.get('/runs', (req, res) => res.json(listRuns(req.query)));
 router.get('/runs/export.xlsx', wrap(async (req, res) => {
   const buf = await xlsxBuffer(runsListSheets(listRuns({ ...req.query, limit: req.query.limit || 5000 }, 5000)));
-  download(res, XLSX_TYPE, `pbi-validation-runs-${stamp()}.xlsx`).send(buf);
+  download(res, XLSX_TYPE, `pbireporttest-runs-${stamp()}.xlsx`).send(buf);
 }));
 router.get('/runs/:id', wrap((req, res) => res.json(mustGet('runs', idParam(req)))));
 router.delete('/runs/:id', wrap((req, res) => {
@@ -291,19 +291,19 @@ router.get('/runs/:id/events', wrap((req, res) => {
 router.get('/runs/:id/export.json', wrap((req, res) => {
   const b = loadRunBundle(idParam(req));
   if (!b) throw httpError(404, 'Run not found');
-  res.setHeader('Content-Disposition', `attachment; filename="pbi-validation-run-${b.run.id}.json"`);
+  res.setHeader('Content-Disposition', `attachment; filename="pbireporttest-run-${b.run.id}.json"`);
   res.json(b);
 }));
 router.get('/runs/:id/junit.xml', wrap((req, res) => {
   const b = loadRunBundle(idParam(req));
   if (!b) throw httpError(404, 'Run not found');
-  res.type('application/xml').setHeader('Content-Disposition', `attachment; filename="pbi-validation-run-${b.run.id}.junit.xml"`);
+  res.type('application/xml').setHeader('Content-Disposition', `attachment; filename="pbireporttest-run-${b.run.id}.junit.xml"`);
   res.send(junitXml(b));
 }));
 router.get('/runs/:id/export.xlsx', wrap(async (req, res) => {
   const b = loadRunBundle(idParam(req));
   if (!b) throw httpError(404, 'Run not found');
-  download(res, XLSX_TYPE, `pbi-validation-run-${b.run.id}.xlsx`).send(await xlsxBuffer(runSheets(b)));
+  download(res, XLSX_TYPE, `pbireporttest-run-${b.run.id}.xlsx`).send(await xlsxBuffer(runSheets(b)));
 }));
 router.get('/runs/:id/report.pdf', wrap(async (req, res) => {
   const b = loadRunBundle(idParam(req));
@@ -311,7 +311,7 @@ router.get('/runs/:id/report.pdf', wrap(async (req, res) => {
   if (['queued', 'running'].includes(b.run.status)) throw httpError(409, 'The run is still in progress; export it when it has finished');
   const pdf = await renderRunPdf(b);
   // inline: opens in the browser's PDF viewer; ?download=1 saves straight to disk.
-  res.type('application/pdf').setHeader('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="pbi-validation-run-${b.run.id}.pdf"`);
+  res.type('application/pdf').setHeader('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="pbireporttest-run-${b.run.id}.pdf"`);
   res.setHeader('Cache-Control', 'private, no-store');
   res.send(pdf);
 }));

@@ -20,11 +20,12 @@ import { runQueue, bus } from './jobs/queue.js';
 import { loadRunBundle, junitXml, streamHtmlZip } from './jobs/export.js';
 import { interactiveLogin, checkProfile } from './auth/profiles.js';
 import { config } from './config.js';
-import { findUserByEmail, updateUser, audit, inviteUser, issueTemporaryPassword, ROLES } from './auth/users.js';
+import { findUserByEmail, updateUser, audit, inviteUser, issueTemporaryPassword, ROLES, authSettings } from './auth/users.js';
 
 const isEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
 const printTemp = (email, t) => {
-  console.log(`\n  Sign-in page:        http://${config.host === '0.0.0.0' ? '127.0.0.1' : config.host}:${config.port}/`);
+  const url = authSettings().publicUrl || `http://${config.host === '0.0.0.0' ? '127.0.0.1' : config.host}:${config.port}`;
+  console.log(`\n  Sign-in page:        ${url}/`);
   console.log(`  Email:               ${email}`);
   console.log(`  Temporary password:  ${t.password}`);
   console.log(`  Expires:             ${new Date(t.expiresAt).toLocaleString()} (${t.hours} h)\n`);

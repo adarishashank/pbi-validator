@@ -14,7 +14,7 @@ function AuthLayout({ title, sub, children, footer, aside }) {
   const cfg = useStore().authConfig || {};
   return html`<div class="auth">
     <aside class="auth-side">
-      <div class="auth-logo"><span class="brand-mark">${LOGO}</span><span><b>PBI Validator</b><small>Power BI regression testing</small></span></div>
+      <div class="auth-logo"><span class="brand-mark">${LOGO}</span><span><b>PBI Report Test</b><small>Power BI regression testing</small></span></div>
       <div class="auth-pitch">
         <h2>${aside?.title || html`Catch report problems<br />before your users do.`}</h2>
         <ul>${(aside?.items || FEATURES).map(([ico, h, p]) => html`<li><span class="ai-ico">${ico}</span><div><b>${h}</b><span>${p}</span></div></li>`)}</ul>
@@ -23,7 +23,7 @@ function AuthLayout({ title, sub, children, footer, aside }) {
     </aside>
     <main class="auth-main">
       <div class="auth-box">
-        <div class="auth-logo compact"><span class="brand-mark">${LOGO}</span><b>PBI Validator</b></div>
+        <div class="auth-logo compact"><span class="brand-mark">${LOGO}</span><b>PBI Report Test</b></div>
         <h1>${title}</h1>${sub && html`<p class="auth-sub">${sub}</p>`}
         ${children}
       </div>
@@ -129,7 +129,7 @@ export function Setup() {
   });
   return html`<${AuthLayout} title="Create the administrator account"
     sub="This is a new installation. The first account becomes the administrator; you can add everyone else afterwards in Admin → Users."
-    aside=${{ title: html`Welcome to<br />PBI Validator.`, items: [['1', 'Create your admin account', 'You\'re doing this now.'], ['2', 'Add your report links', 'Paste the Power BI URLs to test.'], ['3', 'Create a suite and run it', 'Then download the results as PDF or Excel.']] }}>
+    aside=${{ title: html`Welcome to<br />PBI Report Test.`, items: [['1', 'Create your admin account', 'You\'re doing this now.'], ['2', 'Add your report links', 'Paste the Power BI URLs to test.'], ['3', 'Create a suite and run it', 'Then download the results as PDF or Excel.']] }}>
     <${ErrorBox} msg=${error} />
     ${!cfg.setupPossible && html`<div class="callout warn">⚠ <div>For safety, create the first administrator on the machine running the validator (open <code>http://127.0.0.1:4400</code> there), or set <code>API_TOKEN</code> in <code>.env</code> to allow remote setup.</div></div>`}
     <form class="stack auth-form" onSubmit=${submit}>

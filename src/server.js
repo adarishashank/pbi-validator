@@ -17,7 +17,10 @@ const logger = createLogger('server');
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 'loopback');
+  // Which reverse proxies may set X-Forwarded-For/-Proto (client IP, HTTPS).
+  // 'loopback' for a tunnel on the same machine; the cloud setup behind Caddy
+  // in Docker uses 'loopback, uniquelocal'.
+  app.set('trust proxy', config.trustProxy);
 
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -77,7 +80,7 @@ export function start() {
   startHousekeeping();
   const app = createApp();
   const server = app.listen(config.port, config.host, () => {
-    logger.info(`Power BI Validator listening on http://${config.host}:${config.port}  (data: ${config.dataDir})`);
+    logger.info(`PBI Report Test listening on http://${config.host}:${config.port}  (data: ${config.dataDir})`);
     if (userCount() === 0) {
       logger.warn(`No users yet: open http://127.0.0.1:${config.port} on this machine to create the first administrator (or run: npm run cli -- create-admin you@company.com).`);
     }

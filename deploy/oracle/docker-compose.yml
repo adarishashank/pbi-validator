@@ -1,0 +1,45 @@
+# PBI Report Test on a single cloud VM (Oracle Cloud Always Free, or any
+# Ubuntu server): the app + Caddy for automatic HTTPS (Let's Encrypt).
+# Normally started by install.sh / update.sh in this folder; settings come
+# from ./.env, which install.sh creates.
+name: pbireporttest
+
+services:
+  app:
+    build: ../..
+    image: pbireporttest:latest
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "4400"
+      DATA_DIR: /data
+      # Caddy runs in this Docker network: trust its X-Forwarded-* headers
+      # (real client IP for sign-in throttling and the audit log, HTTPS flag).
+      TRUST_PROXY: loopback, uniquelocal
+    volumes:
+      - ./data:/data
+    shm_size: 1gb            # Chromium needs more than Docker's 64 MB default
+    expose: ["4400"]         # reachable only through Caddy, never directly
+    logging: { driver: local, options: { max-size: 20m, max-file: "5" } }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env, e.g. pbireporttest.duckdns.org}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data       # certificates
+      - caddy-config:/config
+    logging: { driver: local, options: { max-size: 10m, max-file: "3" } }
+
+volumes:
+  caddy-data:
+  caddy-config:

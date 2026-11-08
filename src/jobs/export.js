@@ -67,7 +67,7 @@ export function streamHtmlZip(bundle, res) {
   const { run } = bundle;
   const zip = new ZipArchive({ zlib: { level: 6 } });
   res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', `attachment; filename="pbi-validation-run-${run.id}.zip"`);
+  res.setHeader('Content-Disposition', `attachment; filename="pbireporttest-run-${run.id}.zip"`);
   zip.on('error', (e) => res.destroy(e));
   zip.pipe(res);
   const dir = runDir(run.id);

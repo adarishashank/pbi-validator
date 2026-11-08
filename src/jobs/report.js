@@ -248,7 +248,7 @@ export function reportHtml(bundle, { maxIssues = 40, maxPageShots = 24, includeI
     if (S.nextSteps?.length) h += `<h3>Recommended next steps</h3><ol>${S.nextSteps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`;
     if (S.noise?.length) h += `<h3>Probably not real problems</h3><ul>${S.noise.map((n) => `<li>${esc(n.reason)}${refs(n.resultRefs)}</li>`).join('')}</ul>`;
   } else {
-    h += `<div class="note">AI analysis ${ai.summary?.status === 'error' ? `failed for this run: ${esc(ai.summary.error || '')}` : 'was not run for this run'}. Open the run in PBI Validator and use “AI insights” to run it, then export again.</div>`;
+    h += `<div class="note">AI analysis ${ai.summary?.status === 'error' ? `failed for this run: ${esc(ai.summary.error || '')}` : 'was not run for this run'}. Open the run in PBI Report Test and use “AI insights” to run it, then export again.</div>`;
   }
   if (AN) {
     h += `<h3>Data anomalies</h3>${AN.assessment ? `<p>${esc(AN.assessment)}</p>` : ''}`;
@@ -318,7 +318,7 @@ export function renderRunPdf(bundle) {
       const page = await browser.newPage();
       await page.goto(pathToFileURL(file).href, { waitUntil: 'load', timeout: 90_000 });
       const footer = `<div style="font:8px Helvetica,Arial,sans-serif;color:#6b7686;width:100%;padding:0 14mm;display:flex;justify-content:space-between">
-        <span>PBI Validator · ${esc(run.suite_name)} · run #${run.id}</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
+        <span>PBI Report Test · ${esc(run.suite_name)} · run #${run.id}</span><span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
       const pdf = await page.pdf({
         format: 'A4', printBackground: true, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: footer,
         margin: { top: '14mm', bottom: '16mm', left: '12mm', right: '12mm' },

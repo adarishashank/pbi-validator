@@ -24,6 +24,7 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 export const config = {
   version: JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version,
   host: process.env.HOST || '127.0.0.1',
+  trustProxy: process.env.TRUST_PROXY || 'loopback',
   port: int(process.env.PORT, 4400),
   dataDir: DATA_DIR,
   dbPath: path.join(DATA_DIR, 'pbi-validator.db'),

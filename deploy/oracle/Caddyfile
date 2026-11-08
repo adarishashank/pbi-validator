@@ -1,0 +1,13 @@
+# Automatic HTTPS for PBI Report Test. SITE_ADDRESS comes from .env
+# (e.g. pbireporttest.duckdns.org); Caddy obtains and renews the certificate.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	reverse_proxy app:4400 {
+		# Live run progress is streamed (server-sent events): don't buffer.
+		flush_interval -1
+	}
+	log {
+		output stdout
+		format console
+	}
+}

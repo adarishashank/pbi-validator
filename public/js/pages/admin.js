@@ -19,7 +19,7 @@ export function inviteText({ user, tempPassword, expiresAt, signInUrl }, reset =
   return [
     `Hi${user.name ? ` ${user.name.split(' ')[0]}` : ''},`,
     '',
-    reset ? 'Your PBI Validator password has been reset.' : 'An account has been created for you on PBI Validator (Power BI report testing).',
+    reset ? 'Your PBI Report Test password has been reset.' : 'An account has been created for you on PBI Report Test (Power BI report testing).',
     '',
     `Sign in at:          ${signInUrl}`,
     `Email:               ${user.email}`,
@@ -248,7 +248,7 @@ function System() {
     </div>
     <div class="grid g2">
       <div class="panel"><div class="panel-h"><h3>Server</h3><span class="badge ${data.queue.busy ? 'b-running' : 'b-pass'}">${data.queue.busy ? 'Run in progress' : 'Idle'}</span></div><div class="panel-b"><dl class="kv">
-        <dt>Version</dt><dd>PBI Validator ${data.version}</dd>
+        <dt>Version</dt><dd>PBI Report Test ${data.version}</dd>
         <dt>Runtime</dt><dd>Node.js ${data.node}</dd>
         <dt>Host</dt><dd>${data.hostname} · ${data.platform}</dd>
         <dt>Uptime</dt><dd>${fmtUptime(data.uptimeSec)}</dd>

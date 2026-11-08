@@ -173,7 +173,7 @@ test('editor adds report links, builds a suite and runs it end to end', { timeou
 
 test('the run downloads as PDF, Excel and HTML from the browser', { timeout: 240_000 }, async () => {
   const pdf = await download(() => page.click('button:has-text("Download PDF")'));
-  assert.match(pdf.name, /^pbi-validation-run-\d+\.pdf$/);
+  assert.match(pdf.name, /^pbireporttest-run-\d+\.pdf$/);
   assert.equal(pdf.bytes.subarray(0, 5).toString(), '%PDF-');
   assert.ok(pdf.bytes.length > 50_000, `PDF has screenshots (${pdf.bytes.length} bytes)`);
 
@@ -189,7 +189,7 @@ test('the run downloads as PDF, Excel and HTML from the browser', { timeout: 240
 
   await nav('/runs');
   const list = await download(() => page.click('button:has-text("Export to Excel")'));
-  assert.match(list.name, /^pbi-validation-runs-.*\.xlsx$/);
+  assert.match(list.name, /^pbireporttest-runs-.*\.xlsx$/);
   await signOut();
 });
 
