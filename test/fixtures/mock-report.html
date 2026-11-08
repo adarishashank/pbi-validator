@@ -64,7 +64,8 @@ const MATRIX = [
   { name: 'Accessories', value: 120, kids: [['Helmets', B ? 75 : 70], ['Locks', 50]] },
   { name: 'Clothing', value: 80, kids: [['Jerseys', 50], ['Gloves', 30]] },
 ];
-const st = { page: 0, region: null, level: 0, drillRegion: null, drillCity: null, expanded: new Set(), through: null };
+// ?sel=South: the Region slicer opens on South (a published default selection).
+const st = { page: 0, region: new URLSearchParams(location.search).get('sel') || null, level: 0, drillRegion: null, drillCity: null, expanded: new Set(), through: null };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function vc({ type, role, title, x, y, w, h, body, header = '', label }) {

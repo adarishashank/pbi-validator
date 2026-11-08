@@ -200,6 +200,7 @@ export async function executeRun(ctx) {
     if (lanes.length > 1) log('info', `Testing ${lanes.length} pages at a time`);
     if (deadline) log('info', `Time budget: ${cfg.timing.budgetMinutes} min (interactions stop at ${new Date(deadline).toISOString().slice(11, 16)} UTC)`);
 
+    const pins = new Map(); // slicer selections set on purpose (see alignSelections)
     const runPhase = async (phase, from, to) => {
       const queue = [...pairs];
       let finished = 0;
@@ -219,7 +220,7 @@ export async function executeRun(ctx) {
           frac(0);
           log('info', `── ${phase === 'static' ? 'Page' : 'Interactions on page'} "${pageName}"${compare && pair.how === 'position' ? ` (B: "${pair.b.name}")` : ''}${lanes.length > 1 ? ` [tab ${lane.id}]` : ''}`);
           try {
-            await processPage({ ctx, cfg, sel, sides: lane.sides, S: lane.S, both: lane.both, ref, pageName, compare, tol, normalize, frac, checkAbort, counters, phase, deadline });
+            await processPage({ ctx, cfg, sel, sides: lane.sides, S: lane.S, both: lane.both, ref, pageName, compare, tol, normalize, frac, checkAbort, counters, phase, deadline, pins });
           } catch (e) {
             if (e instanceof CancelledError || e.code === 'AUTH_REQUIRED') throw e;
             log('error', `Page "${pageName}" failed: ${e.message.split('\n')[0]}`);
@@ -247,6 +248,140 @@ export async function executeRun(ctx) {
 }
 
 // ---------------------------------------------------------------------------
+const isSlicerVisual = (sel, v) => !!v.slicer || sel.types.slicer.some((t) => t.toLowerCase() === v.type.toLowerCase());
+const sameSet = (a, b) => a.length === b.length && a.every((x) => b.some((y) => y.toLowerCase() === x.toLowerCase()));
+const showSel = (l) => (l.length ? l.join(', ') : 'All');
+
+/**
+ * Puts both reports on the same parameters before a page is compared:
+ * fixed suite parameters go to both sides, and (compare mode) B's slicers are
+ * set to whatever A has selected. A different default selection is recorded as
+ * its own finding, so the visual/value checks after it are not just echoes of
+ * the slicer. Returns what was applied (shown with the page render).
+ */
+async function alignSelections(env) {
+  const { ctx, cfg, sel, sides, both, pageName, compare, state, base, refresh, record, ignoredTitle } = env;
+  const log = ctx.log;
+  const params = (cfg.parameters || []).filter((p) => !p.page || anyMatch([p.page], pageName));
+  const align = compare && cfg.scenarios.alignSelections;
+  state.selected = new Map();
+  if (!params.length && !align) return [];
+  const pairs = state.match.pairs.filter((p) => isSlicerVisual(sel, p.a) && !p.a.slicer?.hasRange && !ignoredTitle(p.a) && (p.b || !compare));
+  if (!pairs.length) return [];
+  // Selections this run set on purpose, per page and side, shared by all tabs:
+  // a reload (or another tab) puts them back.
+  const pins = env.pins || new Map();
+  const pagePins = pins.get(pageName) || { A: new Map(), B: new Map() };
+  pins.set(pageName, pagePins);
+  const pinnedElsewhere = (side, title) => {
+    for (const [pg, pp] of pins) if (pg !== pageName && pp[side].has(title.toLowerCase())) return pp[side].get(title.toLowerCase());
+    return null;
+  };
+  const armReload = () => {
+    for (const s of sides) {
+      const mine = pagePins[s.name];
+      if (!mine?.size) continue;
+      s.report.afterReload = async () => {
+        const ex = await s.report.extract();
+        for (const [t, labels] of mine) {
+          const v = ex.visuals.find((x) => isSlicerVisual(sel, x) && (x.title || '').toLowerCase() === t);
+          if (v) await s.report.setSlicerSelection(v, labels);
+        }
+        await s.report.waitStable();
+      };
+    }
+  };
+
+  const applied = [];
+  const want = new Map(); // key → { A?: labels, B?: labels }
+  for (const p of pairs) {
+    const title = p.a.title || visualLabel(p.a);
+    const param = params.find((x) => anyMatch([x.slicer], title));
+    if (!param && !align) continue;
+    // Cheap first look: list slicers expose their ticks; a dropdown whose text
+    // is the same on both sides shows the same selection.
+    if (!param && p.a.slicer?.hasDropdown && p.b.slicer?.hasDropdown && p.a.lines.join('|') === p.b.lines.join('|')) {
+      // Same text on both sides; a slicer synced with one aligned on another page stays pinned.
+      for (const side of ['A', 'B']) { const l = pinnedElsewhere(side, title); if (l) pagePins[side].set(title.toLowerCase(), l); }
+      continue;
+    }
+    let cur;
+    try {
+      cur = Object.fromEntries(await Promise.all(sides.map(async (s) => [s.name, await s.report.slicerSelection(s.name === 'A' ? p.a : p.b)])));
+    } catch (e) {
+      log('warn', `Could not read the selection of slicer "${title}": ${e.message.split('\n')[0]}`);
+      continue;
+    }
+    state.selected.set(p.key, { ...cur });
+    if (param) {
+      const target = param.values;
+      const w = {};
+      for (const s of sides) if (!sameSet(cur[s.name], target)) w[s.name] = target;
+      if (Object.keys(w).length) want.set(p.key, { pair: p, title, why: 'parameter', before: cur, target: w });
+      else applied.push({ slicer: title, why: 'parameter', values: target, changed: [] });
+      continue;
+    }
+    if (!sameSet(cur.A, cur.B)) want.set(p.key, { pair: p, title, why: 'aligned', before: cur, target: { B: cur.A } });
+    else for (const side of ['A', 'B']) { const l = pinnedElsewhere(side, title); if (l && sameSet(l, cur[side])) pagePins[side].set(title.toLowerCase(), l); }
+  }
+  if (!want.size) { armReload(); return applied; }
+  const orig = { ...base };
+
+  // Apply, side by side; each side's slicers one after the other.
+  const missing = {};
+  await both(async (s) => {
+    for (const [key, w] of want) {
+      if (!w.target[s.name]) continue;
+      const v = s.name === 'A' ? w.pair.a : w.pair.b;
+      try {
+        const r = await s.report.setSlicerSelection(v, w.target[s.name]);
+        if (r.missing.length) (missing[key] ||= {})[s.name] = r.missing;
+      } catch (e) {
+        (missing[key] ||= {})[s.name] = [`(could not set: ${e.message.split('\n')[0].slice(0, 100)})`];
+      }
+    }
+  });
+  await both(async (s) => { await s.report.waitStable(); base[s.name] = await s.report.screenshotCanvas(); });
+  await refresh();
+  for (const [key, w] of want) {
+    for (const [side, labels] of Object.entries(w.target)) if (!missing[key]?.[side]) pagePins[side].set(w.title.toLowerCase(), labels);
+  }
+  armReload();
+
+  for (const [key, w] of want) {
+    const miss = missing[key] || {};
+    const now = {};
+    for (const s of sides) now[s.name] = miss[s.name] ? (w.before[s.name]) : (w.target[s.name] || w.before[s.name]);
+    state.selected.set(key, now);
+    const changed = Object.keys(w.target).filter((side) => !miss[side]);
+    applied.push({ slicer: w.title, why: w.why, values: w.why === 'aligned' ? w.before.A : Object.values(w.target)[0], before: w.before, changed, missing: miss });
+    const missText = Object.entries(miss).map(([side, l]) => `${l.join(', ')} not available in ${side}`).join('; ');
+    log('info', w.why === 'aligned'
+      ? `Slicer "${w.title}": A shows ${showSel(w.before.A)}, B showed ${showSel(w.before.B)}${missText ? ` — ${missText}` : ' — B set to the same values before comparing'}`
+      : `Parameter "${w.title}" = ${showSel(Object.values(w.target)[0])}${missText ? ` — ${missText}` : ''}`);
+    if (!record) continue;
+    if (w.why === 'aligned') {
+      await ctx.record({
+        page: pageName, scenario: 'selections', target: key,
+        title: `"${w.title}" opens on different values: ${showSel(w.before.A)} (A) vs ${showSel(w.before.B)} (B)`,
+        status: 'diff',
+        images: { a: cropBuffer(orig.A, w.pair.a.box), b: cropBuffer(orig.B, w.pair.b.box) },
+        details: {
+          slicer: w.title, defaultA: w.before.A, defaultB: w.before.B, applied: !miss.B,
+          note: miss.B ? `B's slicer has no ${missText.replace(/ not available in B$/, '')}: the page was compared with different selections`
+            : `B was set to ${showSel(w.before.A)} before the page was compared, so the other checks on this page compare the same selection`,
+        },
+      });
+    } else if (Object.keys(miss).length) {
+      await ctx.record({
+        page: pageName, scenario: 'selections', target: key, title: `Parameter "${w.title}" = ${showSel(Object.values(w.target)[0])} could not be set`,
+        status: 'fail', details: { slicer: w.title, wanted: Object.values(w.target)[0], missing: miss, note: missText },
+      });
+    }
+  }
+  return applied;
+}
+
 async function processPage(env) {
   const { ctx, cfg, sel, sides, S, both, ref, pageName, compare, tol, normalize, frac, checkAbort, counters } = env;
   const log = ctx.log;
@@ -278,6 +413,8 @@ async function processPage(env) {
   await refresh();
 
   const recordStatic = env.phase !== 'interactive';
+  for (const s of sides) s.report.afterReload = null;
+  state.selections = await alignSelections({ ...env, base, state, refresh, record: recordStatic, ignoredTitle });
   // Health -------------------------------------------------------------
   if (recordStatic) {
   const errs = Object.fromEntries(sides.map((s) => [s.name, state.ex[s.name].visuals.filter((v) => v.error).map((v) => ({ visual: visualLabel(v), error: v.error, box: v.box }))]));
@@ -295,7 +432,7 @@ async function processPage(env) {
   if (cfg.scenarios.pageRender && recordStatic) {
     await ctx.record(imageResult({
       page: pageName, scenario: 'page_render', target: 'page', title: `Page render · ${pageName}`,
-      a: base.A, b: base.B, compare, cfg, details: { renderMs, canvasA: state.ex.A.canvas, canvasB: state.ex.B?.canvas },
+      a: base.A, b: base.B, compare, cfg, details: { renderMs, canvasA: state.ex.A.canvas, canvasB: state.ex.B?.canvas, ...(state.selections.length ? { selections: state.selections } : {}) },
     }));
   }
 
@@ -525,7 +662,13 @@ async function processPage(env) {
           const res = pageVerdict(cap, { value: label, valueFound: found });
           if (compare && !found.B) { res.status = 'fail'; res.details.note = `Value "${label}" is not available in report B's slicer`; }
           return res;
-        }, { undo: (s) => { const p = state.byKey.get(p0.key); return p ? s.report.clearSlicer(s.name === 'A' ? p.a : p.b) : null; } });
+        }, { undo: (s) => {
+          const p = state.byKey.get(p0.key);
+          if (!p) return null;
+          const v = s.name === 'A' ? p.a : p.b;
+          const known = state.selected?.get(p0.key)?.[s.name];
+          return known?.length ? s.report.setSlicerSelection(v, known) : s.report.clearSlicer(v);
+        } });
       }
     }
   }

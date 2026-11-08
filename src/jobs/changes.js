@@ -59,6 +59,11 @@ export function runChanges(runId) {
       .map((r) => ({ resultId: r.id, scenario: r.scenario, title: r.title, status: r.status, summary: interactionSummary(r) }));
     const health = rows.filter((r) => r.scenario === 'health').flatMap((r) => Object.entries(r.details?.errors || {}).flatMap(([side, list]) => (list || []).map((e) => ({ side, visual: e.visual, error: e.error }))));
     const render = rows.find((r) => r.scenario === 'page_render');
+    // Slicers that open on different values (B was aligned to A before comparing).
+    const selections = rows.filter((r) => r.scenario === 'selections').map((r) => ({
+      resultId: r.id, status: r.status, title: r.title, slicer: r.details?.slicer || '',
+      a: r.details?.defaultA ?? null, b: r.details?.defaultB ?? null, applied: r.details?.applied ?? null, note: r.details?.note || '',
+    }));
     return {
       name,
       renamedTo: renamedTo.get(name) || null,
@@ -77,10 +82,12 @@ export function runChanges(runId) {
       visualsChanged,
       interactions,
       health,
+      selections,
+      comparedOn: render?.details?.selections || [],
     };
   });
   for (const name of inv.onlyInB || []) {
-    pages.push({ name, renamedTo: null, state: 'added', level: 'medium', score: 0, checks: 0, byStatus: {}, problems: 0, accepted: 0, pixel: null, renderResultId: null, layout: [], values: [], valuesChanged: 0, visualsChanged: [], interactions: [], health: [] });
+    pages.push({ name, renamedTo: null, state: 'added', level: 'medium', score: 0, checks: 0, byStatus: {}, problems: 0, accepted: 0, pixel: null, renderResultId: null, layout: [], values: [], valuesChanged: 0, visualsChanged: [], interactions: [], health: [], selections: [], comparedOn: [] });
   }
 
   // Data model (report level).
@@ -110,6 +117,7 @@ export function runChanges(runId) {
     valuesChanged: sum((p) => p.valuesChanged),
     interactionsChanged: sum((p) => p.interactions.filter((i) => i.status !== 'accepted').length),
     modelChanges: model ? model.changes.filter((c) => !c.accepted).length : 0,
+    selectionsDiffer: sum((p) => p.selections.filter((x) => x.status !== 'accepted' && x.status !== 'pass').length),
     problems: sum((p) => p.problems),
     accepted: sum((p) => p.accepted),
   };
@@ -152,6 +160,12 @@ export function topDifferences(ch, results, max = 12) {
   }
   for (const p of ch.pages) {
     if (p.state === 'removed' || p.state === 'added') continue;
+    for (const x of p.selections) {
+      if (x.status === 'accepted' || x.status === 'pass') continue;
+      const show = (l) => (Array.isArray(l) ? (l.length ? l.join(', ') : 'All') : '?');
+      add({ priority: 'P1', area: 'Defaults', page: p.name, title: x.status === 'fail' ? x.title : `Slicer "${x.slicer}" opens on ${show(x.a)} in A but ${show(x.b)} in B`,
+        evidence: x.note, owner: 'Report developer', ids: [x.resultId] });
+    }
     for (const h of p.health) add({ priority: 'P1', area: 'Visual error', page: p.name, title: `${h.visual} shows an error in ${h.side}`, evidence: clip(h.error, 80), owner: 'Report developer', ids: [] });
     for (const v of p.values) {
       if (v.status === 'accepted') continue;
@@ -173,7 +187,7 @@ export function topDifferences(ch, results, max = 12) {
   }
   for (const name of rp.added) add({ priority: 'P3', area: 'Page', page: name, title: `New page "${name}" in B`, evidence: 'Not compared', owner: 'Report developer', ids: [] });
   const rank = { P1: 0, P2: 1, P3: 2 };
-  const areaRank = { 'Data model': 0, Numbers: 1, Page: 2, 'Visual error': 3, Visual: 4, Interaction: 5, Layout: 6 };
+  const areaRank = { 'Data model': 0, Defaults: 1, Numbers: 1, Page: 2, 'Visual error': 3, Visual: 4, Interaction: 5, Layout: 6 };
   return items.sort((a, b) => rank[a.priority] - rank[b.priority] || (areaRank[a.area] ?? 9) - (areaRank[b.area] ?? 9)).slice(0, max)
     .map(({ ids, ...x }) => ({ ...x, resultIds: ids }));
 }
@@ -192,6 +206,7 @@ function headline(t, inv) {
   }
   if (t.visualsAdded || t.visualsRemoved) parts.push(`visuals: ${t.visualsAdded} added, ${t.visualsRemoved} removed`);
   if (t.valuesChanged) parts.push(`${plural(t.valuesChanged, 'value change')} in ${plural(t.visualsWithDataChanges, 'visual')}`);
+  if (t.selectionsDiffer) parts.push(`${plural(t.selectionsDiffer, 'slicer')} ${t.selectionsDiffer === 1 ? 'opens' : 'open'} on different values`);
   if (t.modelChanges) parts.push(`data model: ${plural(t.modelChanges, 'change')}`);
   if (t.interactionsChanged) parts.push(`${plural(t.interactionsChanged, 'interaction')} ${t.interactionsChanged === 1 ? 'behaves' : 'behave'} differently`);
   if (!parts.length) return t.accepted ? `No new changes (${t.accepted} accepted as expected)` : 'No changes found';

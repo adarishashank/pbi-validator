@@ -28,6 +28,9 @@ export const SuiteConfigSchema = z.object({
     crossFilter: z.boolean().default(true),    // click data points, compare cross-filtering
     tooltips: z.boolean().default(true),       // hover data points, compare tooltip content
     model: z.boolean().default(true),          // compare the data model: tables, columns, measures (DAX), relationships, roles
+    // Before comparing a page, set B's slicers to the values selected in A, so values are compared
+    // on the same parameters. A different default selection is reported on its own.
+    alignSelections: z.boolean().default(true),
   }).prefault({}),
   limits: z.object({
     slicerValues: z.number().int().min(0).max(20).default(2),
@@ -71,6 +74,13 @@ export const SuiteConfigSchema = z.object({
     vision: z.boolean().default(true),         // send diff screenshots to the vision model
     maxVisionItems: z.number().int().min(0).max(50).default(8),
   }).prefault({}),
+  // Fixed slicer selections applied to both reports before comparing, e.g.
+  // { slicer: 'Region', values: ['South'] }. slicer/page: exact name or /regex/; page empty = every page.
+  parameters: z.array(z.object({
+    slicer: z.string().min(1),
+    values: z.array(z.string()).default([]),
+    page: z.string().default(''),
+  })).max(50).default([]),
   resetToDefaultOnLoad: z.boolean().default(true),
   retries: z.number().int().min(0).max(3).default(1),
   selectors: z.record(z.string(), z.any()).default({}),

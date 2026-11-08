@@ -31,6 +31,8 @@ function ValueTable({ changes }) {
   </tbody></table>`;
 }
 
+const showSel = (l) => (Array.isArray(l) ? (l.length ? l.join(', ') : 'All') : '—');
+
 function PageDetail({ p, onOpen }) {
   const [openVisual, setOpenVisual] = useState(null);
   if (p.state === 'added') return html`<div class="panel panel-b"><b>${p.name}</b> exists only in B (a new page). It wasn't compared.</div>`;
@@ -40,6 +42,12 @@ function PageDetail({ p, onOpen }) {
   const list = [...visuals.values()];
   return html`<div class="stack" style="gap:12px">
     ${p.state === 'removed' && html`<div class="callout err">This page exists only in A: it was removed or hidden in B.</div>`}
+    ${(p.selections || []).length > 0 && html`<div class="panel panel-b"><h3>Slicers that open on different values</h3>
+      <table class="t"><thead><tr><th>Slicer</th><th>A</th><th>B</th><th>Compared on</th></tr></thead><tbody>
+      ${p.selections.map((x) => html`<tr style="cursor:pointer" onClick=${() => onOpen?.(x.resultId)}><td><b>${x.slicer}</b></td><td>${showSel(x.a)}</td><td>${showSel(x.b)}</td>
+        <td class="small">${x.applied ? html`<span>${showSel(x.a)} on both</span>` : html`<span class="muted">${x.note}</span>`}</td></tr>`)}</tbody></table>
+      <div class="small muted" style="margin-top:6px">B was set to A's values before this page was compared, so the value differences below are not caused by these slicers.</div></div>`}
+    ${(p.comparedOn || []).some((x) => x.why === 'parameter') && html`<div class="small muted">Compared with fixed parameters: ${p.comparedOn.filter((x) => x.why === 'parameter').map((x) => `${x.slicer} = ${showSel(x.values)}`).join(' · ')}</div>`}
     ${p.layout.length > 0 && html`<div class="panel panel-b"><h3>Layout</h3><table class="t"><thead><tr><th>Visual</th><th>Change</th></tr></thead><tbody>
       ${p.layout.map((l) => html`<tr><td>${l.visual}</td><td><b>${l.change}</b>${l.change === 'retitled' ? html` <span class="small muted">"${l.a}" → "${l.b}"</span>` : ''}</td></tr>`)}</tbody></table></div>`}
     <div class="panel panel-b"><h3>Visuals ${list.length ? `(${list.length} changed)` : ''}</h3>

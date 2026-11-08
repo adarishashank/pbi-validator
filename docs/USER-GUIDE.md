@@ -270,6 +270,7 @@ Click a page tile to open that page (Figure 14):
 
 - **Layout**: visuals added, removed, moved, resized or retitled.
 - **Visuals**: every visual that looks or reads differently. Click its name to see each changed value, **A (before)** in red and **B (after)** in green. "No data change" means only the picture differs.
+- **Slicers that open on different values**: the slicer, what A and B show when the page opens, and the values both were set to before comparing.
 - **Interactions that behave differently**: for example a button that goes to another page, or a drill that shows other numbers at level 2.
 - **Open check** opens the full evidence: screenshots, data and the AI explanation. Click **Report** in the breadcrumb to go back to all pages.
 
@@ -362,6 +363,7 @@ The page inventory (pages added, removed, renamed or reordered) is always checke
 | **Every visual** | A screenshot and the data of each visual (cards, tables, matrices, chart values). |
 | **Buttons & navigators** | Clicks buttons and page/bookmark navigators and checks where they go and what changes. |
 | **Slicers** | Applies slicer values and compares the filtered page and data. |
+| **Same slicer values on both sides** | On by default. Before a page is compared, B's slicers are set to the values selected in A, so both pages show the same selection. A slicer that opens on different values is reported once, on its own (see below). |
 | **Hierarchy drill** | Drills down, expands all and goes to the next level on hierarchical visuals, level by level (for example Year → Quarter → Month), and compares every level. |
 | **Drill-through** | Right-clicks a data point → Drill through to each target page, and compares the page each report lands on. |
 | **Matrix +/- expand** | Expands matrix row groups and compares the expanded data. |
@@ -371,6 +373,10 @@ The page inventory (pages added, removed, renamed or reordered) is always checke
 
 ![Choosing scenarios, coverage limits and AI options](images/13-suite-scenarios.jpg)
 *Figure 20. Choosing scenarios, coverage limits and AI options*
+
+**Why "same slicer values" matters.** If a slicer opens on North in A but on South in B, every visual on that page shows different numbers, and the real differences are buried under them. With this option on, the run first records the slicer itself as one finding ("Sector" opens on different values: North (A) vs South (B)), sets B to North, and only then compares the page. Every other difference on that page is then a real one. Turn it off only if you want to see how each report looks exactly as it opens.
+
+**Fixed parameters** (same tab) set slicers to chosen values on **both** reports before comparing, for example to always compare one business unit. Write one per line: `Sector = North`, or several values and a page: `Region = East, West @ Sales overview`. Without a page, the parameter applies to every page with that slicer. Leave the values empty (`Region =`) to clear a slicer. A value that one report does not have is reported as a failure. Date and range slicers are not set automatically.
 
 On the same tab, **coverage limits** set how much is tested (for example values per slicer, buttons per page, **drill depth** and **data points drilled per visual**): higher is more thorough but slower (see 4.12 for how much slower). **AI analysis** options turn on the automatic AI summary after each run and AI explanations of screenshot differences.
 
@@ -526,6 +532,7 @@ Each extra level is one more click and comparison per visual, roughly **3 to 10 
 | **Some checks say "Skipped: time budget"** | The run reached its time limit (15 minutes by default) before every interaction was tried; screenshots, layout and data were still checked on every page. Raise the budget, limit the pages, or test more pages at the same time. |
 | **Runs got much slower** | Check the suite's drill depth and data points (4.12). Lower them, or limit the pages tested. |
 | **Microsoft blocks the sign-in ("You can't get there from here", device not compliant)** | Your organisation only allows sign-ins from managed devices. Use a test account that is allowed to sign in from servers, or ask an administrator to sign in with **npm run login** on a managed computer and **Import** the session. |
+| **"… opens on different values: North (A) vs South (B)"** | The two reports open that slicer on different values (a saved default in the report, or a persistent filter). The rest of the page was compared on A's values. If the default in B is wrong, fix it in the report; if it is intended, **Accept as expected**. |
 | **Numbers differ only by rounding** | Set a numeric tolerance on the suite, for example 0.001. |
 | **A "last refreshed" date always differs** | Add an ignore text pattern such as `Last refreshed: .*`. |
 | **The AI tab says AI is not configured** | Ask your administrator to enable AI analysis. |

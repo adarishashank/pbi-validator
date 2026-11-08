@@ -15,6 +15,7 @@ A self-hosted website for **end-to-end validation of Power BI reports**. Add rep
 | **Every visual** | Cropped screenshot + extracted content: card values, table/matrix cells, chart data points and axis labels, slicer items | pixel and **data** differences (line-level diff) |
 | **Buttons & navigators** | Clicks action buttons, page/bookmark navigator items | different destination page, popup vs none, different resulting state |
 | **Slicers** | Applies values (spread across the list) in A and B | different filtered page / data; value missing in B |
+| **Same slicer values** (`alignSelections`, on) | Before comparing a page, reads what each slicer has selected in A and B and sets B to A's values; optional fixed `parameters` (e.g. `Region = South`) are set on both | a slicer that opens on different values, reported once (`selections`), so the visuals after it are compared on the same selection; a fixed parameter value missing in a report |
 | **Data model** | Reads both semantic models (uploaded `.pbit` / `model.bim` / TMDL, or the Power BI REST API) | tables, columns, measures (DAX), relationships, row-level security roles and shared queries added, missing or changed |
 | **Hierarchy drill** | *Expand all down one level*, *Go to next level*, right-click → *Drill down*, drill-mode, followed **level by level** (`drillDepth`, default 2: e.g. Year → Quarter → Month) on up to `drillPoints` data points per visual | different drilled visual / data at any level, a hierarchy that ends earlier in one report, control missing in B |
 | **Drill-through** | Right-click a data point → *Drill through* → each target page | different landing page / data, target missing in B |
@@ -58,6 +59,16 @@ Each comparison run has a **What changed** tab: a one-line headline (pages remov
 3. The Power BI REST API with the **signed-in session** of the report link's Power BI sign-in.
 
 Options 2 and 3 need an app.powerbi.com link with workspace and report IDs (`/groups/…/reports/…`). Security roles are read only with admin rights on the model. Whitespace-only DAX changes are ignored. Every model difference is its own check, so intended changes can be *accepted as expected*.
+
+## Same parameters on both sides
+
+A slicer that opens on different values (North in A, South in B) makes every visual on the page differ and hides the real differences. With **Same slicer values on both sides** (default on), each page is compared like this:
+
+1. Read the selected values of every list and dropdown slicer in A and B (dropdowns are opened only when their text differs).
+2. If they differ, record **one** `selections` finding with pictures of both slicers as they opened (ranked P1 *Defaults* in the action items), then set B to A's values.
+3. Compare the page, visuals and data on that same selection. After a reload or a slicer test, the aligned values are put back, so interactions start from the same state too.
+
+**Fixed parameters** (suite → Scenarios) are set on both reports first: one per line, `Slicer = value1, value2 @ Page` (page optional; slicer and page can be `/regex/`; empty values clear the slicer). In JSON: `"parameters": [{ "slicer": "Region", "values": ["South"], "page": "" }]`. Date/range slicers are not set automatically.
 
 ## Speed: time budget and parallel pages
 

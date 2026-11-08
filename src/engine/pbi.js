@@ -32,6 +32,7 @@ export class PbiReport {
     this.navStrategy = 'single';
     this.pageItemSelector = null;
     this.reloads = 0;
+    this.afterReload = null; // set by the runner while a page has deliberate slicer selections
     this.popups = [];
     // Only windows this tab opens (other tabs of the same browser context belong to other workers).
     page.on('popup', (p) => this.popups.push(p));
@@ -274,6 +275,8 @@ export class PbiReport {
     if (this.cfg.resetToDefaultOnLoad) await this.resetToDefault();
     await this.waitStable();
     await this.gotoPage(ref);
+    // Puts back slicer selections the run set on purpose (aligned / fixed parameters).
+    if (this.afterReload) await this.afterReload().catch((e) => this.log('warn', `Could not re-apply slicer selections after reload: ${e.message.split('\n')[0]}`));
   }
 
   /**
@@ -449,6 +452,63 @@ export class PbiReport {
     await sleep(300);
     if (v.slicer?.hasDropdown) await this.page.keyboard.press('Escape').catch(() => {});
     return true;
+  }
+
+  /**
+   * The values selected in a slicer ([] = nothing selected / all). List slicers
+   * are read from the page; dropdown slicers are opened briefly.
+   */
+  async slicerSelection(v) {
+    const pick = (items) => {
+      if (items.some((i) => i.checked && /^select all$/i.test(i.label))) return [];
+      return items.filter((i) => i.checked && i.label && !/^select all$/i.test(i.label)).map((i) => i.label);
+    };
+    if (!v.slicer?.hasDropdown) return pick(v.slicer?.items || []);
+    await this.openSlicerList(v);
+    const items = await this.frame.locator(`${this.sel.slicerItem}:visible`).evaluateAll((els) => els.map((e) => ({
+      label: (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim(),
+      checked: e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true' || !!e.querySelector('[aria-checked="true"], [aria-selected="true"], .selected'),
+    })));
+    await this.dismissOverlays();
+    return pick(items);
+  }
+
+  /** Opens a dropdown slicer's list unless it is already open. */
+  async openSlicerList(v) {
+    if (!v.slicer?.hasDropdown) return;
+    if (await this.frame.locator(`${this.sel.slicerItem}:visible`).count().catch(() => 0)) return;
+    await this.slicerItems(v);
+  }
+
+  /**
+   * Sets a slicer to exactly these values ([] = clear). Returns the values that
+   * do not exist in this report's slicer.
+   */
+  async setSlicerSelection(v, labels) {
+    await this.clearSlicer(v);
+    await this.waitStable({ timeout: 15000 });
+    if (!labels.length) return { missing: [] };
+    const missing = [];
+    let clicked = 0;
+    for (const want of labels) {
+      await this.openSlicerList(v);
+      const scope = v.slicer?.hasDropdown
+        ? this.frame.locator(`${this.sel.slicerItem}:visible`)
+        : this.frame.locator(this.sel.visualContainer).nth(v.domIndex).locator(this.sel.slicerItem);
+      const info = await scope.evaluateAll((els) => els.map((e) => ({
+        label: (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim(),
+        checked: e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true',
+      })));
+      const idx = info.findIndex((i) => norm(i.label) === norm(want));
+      if (idx < 0) { missing.push(want); continue; }
+      if (info[idx].checked) { clicked++; continue; } // single-select slicers keep one value
+      await scope.nth(idx).click({ timeout: this.cfg.timing.actionTimeoutMs, modifiers: clicked ? ['ControlOrMeta'] : [] });
+      clicked++;
+      await sleep(300);
+    }
+    if (v.slicer?.hasDropdown) await this.dismissOverlays();
+    await this.waitStable({ timeout: 20000 });
+    return { missing };
   }
 
   async clearSlicer(v) {

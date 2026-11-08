@@ -13,6 +13,7 @@ const SCENARIOS = [
   ['matrixExpand', 'Matrix +/- expand', 'Expands matrix row groups and compares the expanded data'],
   ['crossFilter', 'Cross-filtering', 'Clicks data points and compares how the rest of the page reacts'],
   ['tooltips', 'Tooltips', 'Hovers data points and compares tooltip content'],
+  ['alignSelections', 'Same slicer values on both sides', 'Before comparing a page, sets B’s slicers to the values selected in A. A slicer that opens on different values is reported once as its own finding instead of making every visual differ'],
   ['model', 'Data model', 'Compares tables, columns, measures (DAX), relationships and security roles of the two semantic models (uploaded model file or Power BI API)'],
 ];
 const LIMITS = [
@@ -22,6 +23,17 @@ const LIMITS = [
 ];
 
 const lines = (s) => s.split('\n').map((x) => x.trim()).filter(Boolean);
+// "Region = East, West @ Sales overview" ⇄ { slicer: 'Region', values: ['South', 'NZ'], page: 'Sales overview' }
+const paramsToText = (list = []) => list.map((p) => `${p.slicer} = ${p.values.join(', ')}${p.page ? ` @ ${p.page}` : ''}`).join('\n');
+function textToParams(t) {
+  const out = [];
+  for (const line of lines(t)) {
+    const m = /^(.+?)\s*=\s*(.*?)(?:\s+@\s*(.+))?$/.exec(line);
+    if (!m) throw new Error(`Parameter line "${line}" should look like: Slicer = value1, value2 @ Page (page optional)`);
+    out.push({ slicer: m[1].trim(), values: m[2].split(',').map((x) => x.trim()).filter(Boolean), page: (m[3] || '').trim() });
+  }
+  return out;
+}
 
 /** Differences accepted as expected for a suite, with the option to stop accepting. */
 function AcceptedList({ suiteId }) {
@@ -56,6 +68,7 @@ function SuiteEditor({ suite, reports, defaults, timezone, onDone }) {
     visualTypes: base.ignore.visualTypes.join('\n'), visualTitles: base.ignore.visualTitles.join('\n'),
     textPatterns: base.ignore.textPatterns.join('\n'), maskSelectors: base.ignore.maskSelectors.join('\n'),
     selectors: Object.keys(base.selectors || {}).length ? JSON.stringify(base.selectors, null, 2) : '',
+    parameters: paramsToText(base.parameters),
   });
   const [tab, setTab] = useState('basics');
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -67,8 +80,11 @@ function SuiteEditor({ suite, reports, defaults, timezone, onDone }) {
     if (txt.selectors.trim()) {
       try { selectors = JSON.parse(txt.selectors); } catch { return act(() => { throw new Error('Selector overrides must be valid JSON'); }); }
     }
+    let parameters;
+    try { parameters = textToParams(txt.parameters); } catch (e) { return act(() => { throw e; }); }
     const config = {
       ...c,
+      parameters,
       pages: { include: lines(txt.include), exclude: lines(txt.exclude) },
       ignore: { visualTypes: lines(txt.visualTypes), visualTitles: lines(txt.visualTitles), textPatterns: lines(txt.textPatterns), maskSelectors: lines(txt.maskSelectors) },
       selectors,
@@ -102,6 +118,8 @@ function SuiteEditor({ suite, reports, defaults, timezone, onDone }) {
 
     ${tab === 'scenarios' && html`<div class="stack">
       <div class="grid g2">${SCENARIOS.map(([k, label, desc]) => html`<${Check} label=${label} desc=${desc} checked=${c.scenarios[k]} onChange=${(v) => setIn('scenarios', k, v)} />`)}</div>
+      <${Field} label="Fixed parameters (slicer values set on both reports before comparing)" full hint="One per line: Slicer = value1, value2 @ Page. The page part is optional (empty = every page with that slicer); slicer and page can be /regex/. Leave the values empty (Region =) to clear a slicer. A value that does not exist in a report is reported as a failure.">
+        <textarea style="min-height:70px" value=${txt.parameters} onInput=${(e) => setTxt({ ...txt, parameters: e.target.value })} placeholder=${'Sector = North\nRegion = East, West @ Sales overview'}></textarea></${Field}>
       <div class="fieldset"><h4>Coverage limits</h4><div class="form-grid g3">
         ${LIMITS.map(([k, label, min, max]) => html`<${Field} label=${label}><input type="number" min=${min} max=${max} value=${c.limits[k]} onInput=${num('limits', k)} /></${Field}>`)}
       </div></div>
