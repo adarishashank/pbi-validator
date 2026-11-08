@@ -30,8 +30,20 @@ export async function launchBrowser({ headless = true } = {}) {
   });
 }
 
+/**
+ * A regular desktop Chrome user agent for this browser build. Headless Chromium
+ * otherwise announces "HeadlessChrome", which some sign-in pages treat as a bot;
+ * sign-in and test runs use the same agent so saved sessions stay valid.
+ */
+export function browserUserAgent(browser) {
+  const major = String(browser.version()).split('.')[0];
+  const os = process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : 'X11; Linux x86_64';
+  return `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+}
+
 export async function newReportContext(browser, cfg, statePath) {
   const context = await browser.newContext({
+    userAgent: browserUserAgent(browser),
     viewport: cfg.viewport,
     deviceScaleFactor: 1,
     locale: cfg.locale,

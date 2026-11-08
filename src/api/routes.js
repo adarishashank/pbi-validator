@@ -12,6 +12,7 @@ import { xlsxBuffer } from '../jobs/xlsx.js';
 import { pagesStatus, publishRun, unpublishRun } from '../jobs/pages.js';
 import { acceptResult, revokeAcceptance } from '../jobs/acceptances.js';
 import { runChanges } from '../jobs/changes.js';
+import { startRemoteLogin, remoteStatus, remoteFrame, remoteInput, cancelRemoteLogin, VIEW as REMOTE_VIEW } from '../auth/remote.js';
 import path from 'node:path';
 import { snapshotFromUpload, modelStats } from '../model/snapshot.js';
 import { servicePrincipalConfigured } from '../model/powerbi.js';
@@ -106,7 +107,14 @@ const ProfileSchema = z.object({
   login_url: z.union([urlSchema, z.literal('')]).optional().default(''),
 });
 
-const profileOut = (p) => ({ ...p, has_session: fs.existsSync(profileStatePath(p.id)) });
+/** Short, human status text (never a raw browser crash log). */
+function friendlyDetail(d) {
+  const s = String(d || '');
+  if (/XServer|headed browser|platform failed to initialize|Missing X server/i.test(s)) return 'This server has no screen for a sign-in window. Click Sign in to sign in from this website instead.';
+  const first = s.split('\n')[0].replace(/^browserType\.launch: /, '').replace(/\s*╔[\s\S]*$/, '').trim();
+  return first.length > 220 ? `${first.slice(0, 217)}…` : first;
+}
+const profileOut = (p) => ({ ...p, status_detail: friendlyDetail(p.status_detail), has_session: fs.existsSync(profileStatePath(p.id)) });
 
 router.get('/profiles', (req, res) => res.json(q.all('SELECT * FROM auth_profiles ORDER BY name').map(profileOut)));
 router.post('/profiles', wrap((req, res) => {
@@ -126,8 +134,30 @@ router.delete('/profiles/:id', wrap((req, res) => {
   q.run('DELETE FROM auth_profiles WHERE id = ?', id);
   res.status(204).end();
 }));
+// Sign in from the website: a browser on the server, shown live to the editor.
+router.post('/profiles/:id/remote', wrap(async (req, res) => {
+  const id = idParam(req); mustGet('auth_profiles', id);
+  res.status(201).json({ ...(await startRemoteLogin(id, req.user)), view: REMOTE_VIEW });
+}));
+router.get('/profiles/:id/remote', wrap((req, res) => {
+  const id = idParam(req); mustGet('auth_profiles', id);
+  res.json({ ...remoteStatus(id, req.user), view: REMOTE_VIEW });
+}));
+router.get('/profiles/:id/remote/frame', wrap(async (req, res) => {
+  const id = idParam(req);
+  const jpg = await remoteFrame(id, req.user);
+  res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' }).send(jpg);
+}));
+router.post('/profiles/:id/remote/input', wrap(async (req, res) => {
+  res.json(await remoteInput(idParam(req), req.user, req.body || {}));
+}));
+router.delete('/profiles/:id/remote', wrap(async (req, res) => {
+  res.json(await cancelRemoteLogin(idParam(req), req.user));
+}));
+// Sign-in window on the validator's own screen (local installs with a display).
 router.post('/profiles/:id/login', wrap((req, res) => {
   const id = idParam(req); mustGet('auth_profiles', id);
+  if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) throw httpError(409, 'This server has no screen for a sign-in window. Use Sign in (from this website) instead.');
   interactiveLogin(id).catch(() => {}); // status is tracked on the profile row
   res.status(202).json({ started: true, message: 'A browser window has opened on the machine running the validator. Sign in there (MFA supported); the session is captured automatically.' });
 }));

@@ -9,6 +9,7 @@ import api from './api/routes.js';
 import adminApi from './api/admin.js';
 import { authApi } from './api/auth.js';
 import { authenticate, auditTrail } from './auth/middleware.js';
+import { closeAllRemoteLogins } from './auth/remote.js';
 import { userCount } from './auth/users.js';
 import { startScheduler, startHousekeeping } from './jobs/scheduler.js';
 
@@ -87,6 +88,7 @@ export function start() {
   });
   const shutdown = (sig) => {
     logger.info(`${sig} received, shutting down`);
+    closeAllRemoteLogins().catch(() => {});
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
   };

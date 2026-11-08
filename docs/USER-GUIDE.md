@@ -294,15 +294,19 @@ Editors set up and run the tests. Everything in the viewer guide applies to you 
 Secured reports on app.powerbi.com need a Microsoft account to open them. A **Power BI sign-in** stores that session so tests can run unattended (Figure 15).
 
 1. Go to **Power BI sign-ins** and click **+ New sign-in**. Give it a clear name, for example "Contoso · QA account".
-2. Sign the account in:
-
-   - **On a local installation**: click **Sign in**. A real browser window opens on the machine running PBI Report Test; complete the Microsoft sign-in (including MFA). The window closes by itself when Power BI has loaded.
-   - **On the cloud website** (the server has no screen): on a computer with PBI Report Test installed, run `npm run login -- "Contoso · QA account"`, complete the sign-in, then on the website click **Import** next to the sign-in and choose the file it produced (`data/auth/profile-*.json`). Ask your administrator if you need help.
-
-3. Click **Check** to confirm the status is **Active**.
+2. Click **Sign in**. A window shows the Microsoft sign-in page, live, from a browser running on the PBI Report Test server (Figure 16). Click into the page and sign in as usual: email, password, then MFA (for example approve the number in Microsoft Authenticator). Tick **Stay signed in** when asked.
+3. When Power BI opens, the session is saved and the window closes by itself. Click **Check** to confirm the status is **Active**.
 
 ![Power BI sign-ins](images/14-powerbi-signins.jpg)
 *Figure 15. Power BI sign-ins*
+
+![Signing in from the website: the sign-in page is shown live; click and type into it](images/f11-web-signin.jpg)
+*Figure 16. Signing in from the website: the sign-in page is shown live; click and type into it*
+
+- What you type goes to that browser over an encrypted connection and is not stored or logged. Only the resulting Power BI session is saved.
+- If typing doesn't reach the page (for example on a phone or with a password manager), open **Typing doesn't work?** under the picture, click the field in the page, then type in the box and click **Send**.
+- The window closes after 5 minutes without activity; click **Sign in** again to restart.
+- Alternative: on a computer with PBI Report Test installed, run `npm run login -- "Contoso · QA account"`, then click **Import** next to the sign-in and choose the file it produced.
 
 - Use a dedicated test account where possible, not your personal account.
 - If reports A and B live in different tenants, create one sign-in for each.
@@ -310,7 +314,7 @@ Secured reports on app.powerbi.com need a Microsoft account to open them. A **Po
 
 ### 4.3 Report links
 
-Go to **Report links** and click **+ Add report link** (Figures 16 and 17):
+Go to **Report links** and click **+ Add report link** (Figures 17 and 18):
 
 | Field | What to enter |
 |---|---|
@@ -323,14 +327,14 @@ Go to **Report links** and click **+ Add report link** (Figures 16 and 17):
 Click **Discover** on a report link to check it before testing: the tool opens the report and lists its pages with thumbnails, the number of visuals, and the buttons, slicers and charts it found. If it cannot open the report, the message tells you why, for example "Sign-in required".
 
 ![Report links](images/09-report-links.jpg)
-*Figure 16. Report links*
+*Figure 17. Report links*
 
 ![Adding a report link](images/10-add-report-link.jpg)
-*Figure 17. Adding a report link*
+*Figure 18. Adding a report link*
 
 ### 4.4 Test suites
 
-Go to **Test suites** and click **+ New suite** (Figures 18 to 20). The editor has four tabs.
+Go to **Test suites** and click **+ New suite** (Figures 19 to 21). The editor has four tabs.
 
 #### Basics
 
@@ -343,7 +347,7 @@ Go to **Test suites** and click **+ New suite** (Figures 18 to 20). The editor h
 > **Note:** Schedules work even while the website is asleep: it wakes up by itself when a suite is due, runs it, and goes back to sleep. Times are **India Standard Time (Asia/Kolkata)**. If a scheduled run was missed (for example during maintenance), it runs once as soon as possible, unless it is more than 24 hours late. The suite card shows when the next run is due.
 
 ![A new test suite: Basics](images/12-new-suite.jpg)
-*Figure 18. A new test suite: Basics*
+*Figure 19. A new test suite: Basics*
 
 #### Scenarios: what to check
 
@@ -364,7 +368,7 @@ The page inventory (pages added, removed, renamed or reordered) is always checke
 | **Data model** | Compares the two semantic models: tables, columns, measures (DAX), relationships, security roles and shared queries (see 4.12). |
 
 ![Choosing scenarios, coverage limits and AI options](images/13-suite-scenarios.jpg)
-*Figure 19. Choosing scenarios, coverage limits and AI options*
+*Figure 20. Choosing scenarios, coverage limits and AI options*
 
 On the same tab, **coverage limits** set how much is tested (for example values per slicer, buttons per page, **drill depth** and **data points drilled per visual**): higher is more thorough but slower (see 4.12 for how much slower). **AI analysis** options turn on the automatic AI summary after each run and AI explanations of screenshot differences.
 
@@ -382,10 +386,10 @@ Browser size, language, time zone, timeouts and the maximum number of visuals pe
 
 > **Tip:** Start with the defaults and run once. To make sure a suite raises no false alarms, create a copy with the **same report as A and B**: it should pass. Then tune tolerances and ignores to remove noise.
 
-Each suite card (Figure 20) shows its last result and has **▶ Run now**, **History** (its runs), **Edit**, **Duplicate** and **Delete** (past runs are kept).
+Each suite card (Figure 21) shows its last result and has **▶ Run now**, **History** (its runs), **Edit**, **Duplicate** and **Delete** (past runs are kept).
 
 ![Test suites](images/11-suites.jpg)
-*Figure 20. Test suites*
+*Figure 21. Test suites*
 
 ### 4.5 Running a test
 
@@ -410,7 +414,7 @@ Each suite card (Figure 20) shows its last result and has **▶ Run now**, **His
 
 Some differences are intended: a new KPI, a renamed page, numbers restated on purpose. Accept them once so later runs of the suite stop flagging them, and reviewers only see what is new.
 
-1. Open the check in a run and click **✓ Accept as expected** (Figure 21).
+1. Open the check in a run and click **✓ Accept as expected** (Figure 22).
 2. Choose what to accept:
 
    - **This exact difference** (recommended): later runs accept it while the difference stays the same. If the values, behaviour or missing items change again, it is flagged again.
@@ -419,12 +423,12 @@ Some differences are intended: a new KPI, a renamed page, numbers restated on pu
 3. Add a short reason, for example "New KPI added in release 4.2", and click **Accept**.
 
 ![Accepting a difference as expected](images/f2-accept-dialog.jpg)
-*Figure 21. Accepting a difference as expected*
+*Figure 22. Accepting a difference as expected*
 
-The check now shows **Accepted**, with who accepted it, when and why (Figure 22), and the run's result is recounted straight away. Accepted checks are listed separately in the PDF report and marked in the Excel workbook.
+The check now shows **Accepted**, with who accepted it, when and why (Figure 23), and the run's result is recounted straight away. Accepted checks are listed separately in the PDF report and marked in the Excel workbook.
 
 ![An accepted check, with the reason and a Stop accepting button](images/f3-accepted.jpg)
-*Figure 22. An accepted check, with the reason and a Stop accepting button*
+*Figure 23. An accepted check, with the reason and a Stop accepting button*
 
 - To undo, click **Stop accepting** on the check, or open the suite (**Edit**) and use the **Accepted differences** tab, which lists every accepted difference with how often it has matched since.
 - Undoing flags the check again in every run of the suite where it was accepted.
@@ -464,16 +468,16 @@ The response contains the run number; open `/#/runs/<number>` on the website to 
 
 Many changes never show on screen: a measure's DAX, a relationship's direction, a security role's filter. With the **Data model** scenario on, every comparison run also compares the two semantic models. The model of each report link is read from the first source available:
 
-1. **A model file you upload** on the report link: in **Report links**, click **Upload model** in the Data model column (Figure 23). Accepted files: a Power BI template (**.pbit**: in Power BI Desktop, File → Export → Power BI template), a **model.bim**, a **.tmdl** file, or a **.zip** of a TMDL folder (a Power BI Project's "definition" folder). This works for every kind of link, including publish-to-web. Upload a new file whenever the model changes; **Replace** and **Remove** are next to it.
+1. **A model file you upload** on the report link: in **Report links**, click **Upload model** in the Data model column (Figure 24). Accepted files: a Power BI template (**.pbit**: in Power BI Desktop, File → Export → Power BI template), a **model.bim**, a **.tmdl** file, or a **.zip** of a TMDL folder (a Power BI Project's "definition" folder). This works for every kind of link, including publish-to-web. Upload a new file whenever the model changes; **Replace** and **Remove** are next to it.
 2. **The Power BI service**, for app.powerbi.com links that contain the workspace and report (…/groups/…/reports/…): read with the administrator's service principal if one is set up, otherwise with the report link's Power BI sign-in. That account needs **Build** permission on the semantic model.
 
 ![Report links with an uploaded model file for each report](images/f9-model-upload.jpg)
-*Figure 23. Report links with an uploaded model file for each report*
+*Figure 24. Report links with an uploaded model file for each report*
 
-Each difference becomes its own check, so you can open it, see the old and new DAX side by side (Figure 24), and **Accept as expected** if it was intended. DAX that was only re-indented or re-spaced is not reported. Security roles are compared only when the account reading the model has administrator rights on it.
+Each difference becomes its own check, so you can open it, see the old and new DAX side by side (Figure 25), and **Accept as expected** if it was intended. DAX that was only re-indented or re-spaced is not reported. Security roles are compared only when the account reading the model has administrator rights on it.
 
 ![A changed measure: the DAX in A and in B](images/f10-dax-diff.jpg)
-*Figure 24. A changed measure: the DAX in A and in B*
+*Figure 25. A changed measure: the DAX in A and in B*
 
 > **Note:** A .pbix file can't be read directly: save it as a template (.pbit) and upload that. Data model checks compare the model's definition, not the data rows in it; the visual and interaction checks cover the numbers.
 
@@ -515,6 +519,7 @@ Each extra level is one more click and comparison per visual, roughly **3 to 10 
 | **Data model: "not compared" (Skipped)** | The model could not be identified, for example for a publish-to-web link. An editor uploads a .pbit, model.bim or TMDL file on the report link (4.12). |
 | **Data model: "Could not read the data model" (Warning)** | The account reading it lacks Build permission on the semantic model, or the sign-in expired. Grant access, sign in again, or upload a model file instead. |
 | **Runs got much slower** | Check the suite's drill depth and data points (4.12). Lower them, or limit the pages tested. |
+| **Microsoft blocks the sign-in ("You can't get there from here", device not compliant)** | Your organisation only allows sign-ins from managed devices. Use a test account that is allowed to sign in from servers, or ask an administrator to sign in with **npm run login** on a managed computer and **Import** the session. |
 | **Numbers differ only by rounding** | Set a numeric tolerance on the suite, for example 0.001. |
 | **A "last refreshed" date always differs** | Add an ignore text pattern such as `Last refreshed: .*`. |
 | **The AI tab says AI is not configured** | Ask your administrator to enable AI analysis. |

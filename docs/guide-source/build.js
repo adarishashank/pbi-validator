@@ -399,21 +399,24 @@ const editor = [
   P('Secured reports on app.powerbi.com need a Microsoft account to open them. A **Power BI sign-in** stores that session so tests can run unattended (Figure 15).'),
   ...steps([
     'Go to **Power BI sign-ins** and click **+ New sign-in**. Give it a clear name, for example "Contoso · QA account".',
-    'Sign the account in:',
+    'Click **Sign in**. A window shows the Microsoft sign-in page, live, from a browser running on the PBI Report Test server (Figure 16). Click into the page and sign in as usual: email, password, then MFA (for example approve the number in Microsoft Authenticator). Tick **Stay signed in** when asked.',
+    'When Power BI opens, the session is saved and the window closes by itself. Click **Check** to confirm the status is **Active**.',
   ]),
-  ...bullets([
-    '**On a local installation**: click **Sign in**. A real browser window opens on the machine running PBI Report Test; complete the Microsoft sign-in (including MFA). The window closes by itself when Power BI has loaded.',
-    '**On the cloud website** (the server has no screen): on a computer with PBI Report Test installed, run `npm run login -- "Contoso · QA account"`, complete the sign-in, then on the website click **Import** next to the sign-in and choose the file it produced (`data/auth/profile-*.json`). Ask your administrator if you need help.',
-  ], 1),
-  ...stepsCont(['Click **Check** to confirm the status is **Active**.']),
   ...figure('14-powerbi-signins.png', 'Power BI sign-ins'),
+  ...figure('f11-web-signin.png', 'Signing in from the website: the sign-in page is shown live; click and type into it'),
+  ...bullets([
+    'What you type goes to that browser over an encrypted connection and is not stored or logged. Only the resulting Power BI session is saved.',
+    'If typing doesn\'t reach the page (for example on a phone or with a password manager), open **Typing doesn\'t work?** under the picture, click the field in the page, then type in the box and click **Send**.',
+    'The window closes after 5 minutes without activity; click **Sign in** again to restart.',
+    'Alternative: on a computer with PBI Report Test installed, run `npm run login -- "Contoso · QA account"`, then click **Import** next to the sign-in and choose the file it produced.',
+  ]),
   ...bullets([
     'Use a dedicated test account where possible, not your personal account.',
     'If reports A and B live in different tenants, create one sign-in for each.',
     'Sessions expire. When one does, the dashboard shows a warning and runs report "Redirected to sign-in"; sign in or import again.',
   ]),
   H2('4.3 Report links'),
-  P('Go to **Report links** and click **+ Add report link** (Figures 16 and 17):'),
+  P('Go to **Report links** and click **+ Add report link** (Figures 17 and 18):'),
   table([
     ['Field', 'What to enter'],
     ['**Name**', 'A friendly name, for example "Sales Overview".'],
@@ -427,7 +430,7 @@ const editor = [
   ...figure('09-report-links.png', 'Report links'),
   ...figure('10-add-report-link.png', 'Adding a report link', 560),
   H2('4.4 Test suites'),
-  P('Go to **Test suites** and click **+ New suite** (Figures 18 to 20). The editor has four tabs.'),
+  P('Go to **Test suites** and click **+ New suite** (Figures 19 to 21). The editor has four tabs.'),
   H3('Basics'),
   ...bullets([
     '**Suite name** and an optional **description** ("what is this suite protecting?").',
@@ -468,7 +471,7 @@ const editor = [
   H3('Advanced'),
   P('Browser size, language, time zone, timeouts and the maximum number of visuals per page. Leave these at their defaults unless a report needs more time to load.'),
   callout('tip', 'Start with the defaults and run once. To make sure a suite raises no false alarms, create a copy with the **same report as A and B**: it should pass. Then tune tolerances and ignores to remove noise.'),
-  P('Each suite card (Figure 20) shows its last result and has **▶ Run now**, **History** (its runs), **Edit**, **Duplicate** and **Delete** (past runs are kept).'),
+  P('Each suite card (Figure 21) shows its last result and has **▶ Run now**, **History** (its runs), **Edit**, **Duplicate** and **Delete** (past runs are kept).'),
   ...figure('11-suites.png', 'Test suites'),
   H2('4.5 Running a test'),
   ...steps([
@@ -493,7 +496,7 @@ const editor = [
   H2('4.7 Accepting expected differences'),
   P('Some differences are intended: a new KPI, a renamed page, numbers restated on purpose. Accept them once so later runs of the suite stop flagging them, and reviewers only see what is new.'),
   ...steps([
-    'Open the check in a run and click **✓ Accept as expected** (Figure 21).',
+    'Open the check in a run and click **✓ Accept as expected** (Figure 22).',
     'Choose what to accept:',
   ]),
   ...bullets([
@@ -504,7 +507,7 @@ const editor = [
     'Add a short reason, for example "New KPI added in release 4.2", and click **Accept**.',
   ]),
   ...figure('f2-accept-dialog.png', 'Accepting a difference as expected', 560),
-  P('The check now shows **Accepted**, with who accepted it, when and why (Figure 22), and the run\'s result is recounted straight away. Accepted checks are listed separately in the PDF report and marked in the Excel workbook.'),
+  P('The check now shows **Accepted**, with who accepted it, when and why (Figure 23), and the run\'s result is recounted straight away. Accepted checks are listed separately in the PDF report and marked in the Excel workbook.'),
   ...figure('f3-accepted.png', 'An accepted check, with the reason and a Stop accepting button', 560),
   ...bullets([
     'To undo, click **Stop accepting** on the check, or open the suite (**Edit**) and use the **Accepted differences** tab, which lists every accepted difference with how often it has matched since.',
@@ -539,11 +542,11 @@ const editor = [
   H3('Comparing the data models'),
   P('Many changes never show on screen: a measure\'s DAX, a relationship\'s direction, a security role\'s filter. With the **Data model** scenario on, every comparison run also compares the two semantic models. The model of each report link is read from the first source available:'),
   ...steps([
-    '**A model file you upload** on the report link: in **Report links**, click **Upload model** in the Data model column (Figure 23). Accepted files: a Power BI template (**.pbit**: in Power BI Desktop, File → Export → Power BI template), a **model.bim**, a **.tmdl** file, or a **.zip** of a TMDL folder (a Power BI Project\'s "definition" folder). This works for every kind of link, including publish-to-web. Upload a new file whenever the model changes; **Replace** and **Remove** are next to it.',
+    '**A model file you upload** on the report link: in **Report links**, click **Upload model** in the Data model column (Figure 24). Accepted files: a Power BI template (**.pbit**: in Power BI Desktop, File → Export → Power BI template), a **model.bim**, a **.tmdl** file, or a **.zip** of a TMDL folder (a Power BI Project\'s "definition" folder). This works for every kind of link, including publish-to-web. Upload a new file whenever the model changes; **Replace** and **Remove** are next to it.',
     '**The Power BI service**, for app.powerbi.com links that contain the workspace and report (…/groups/…/reports/…): read with the administrator\'s service principal if one is set up, otherwise with the report link\'s Power BI sign-in. That account needs **Build** permission on the semantic model.',
   ]),
   ...figure('f9-model-upload.png', 'Report links with an uploaded model file for each report'),
-  P('Each difference becomes its own check, so you can open it, see the old and new DAX side by side (Figure 24), and **Accept as expected** if it was intended. DAX that was only re-indented or re-spaced is not reported. Security roles are compared only when the account reading the model has administrator rights on it.'),
+  P('Each difference becomes its own check, so you can open it, see the old and new DAX side by side (Figure 25), and **Accept as expected** if it was intended. DAX that was only re-indented or re-spaced is not reported. Security roles are compared only when the account reading the model has administrator rights on it.'),
   ...figure('f10-dax-diff.png', 'A changed measure: the DAX in A and in B'),
   callout('note', 'A .pbix file can\'t be read directly: save it as a template (.pbit) and upload that. Data model checks compare the model\'s definition, not the data rows in it; the visual and interaction checks cover the numbers.'),
   H3('How deep does drilling go, and what does it cost?'),
@@ -585,6 +588,7 @@ const trouble = [
     ['**Data model: "not compared" (Skipped)**', 'The model could not be identified, for example for a publish-to-web link. An editor uploads a .pbit, model.bim or TMDL file on the report link (4.12).'],
     ['**Data model: "Could not read the data model" (Warning)**', 'The account reading it lacks Build permission on the semantic model, or the sign-in expired. Grant access, sign in again, or upload a model file instead.'],
     ['**Runs got much slower**', 'Check the suite\'s drill depth and data points (4.12). Lower them, or limit the pages tested.'],
+    ['**Microsoft blocks the sign-in ("You can\'t get there from here", device not compliant)**', 'Your organisation only allows sign-ins from managed devices. Use a test account that is allowed to sign in from servers, or ask an administrator to sign in with **npm run login** on a managed computer and **Import** the session.'],
     ['**Numbers differ only by rounding**', 'Set a numeric tolerance on the suite, for example 0.001.'],
     ['**A "last refreshed" date always differs**', 'Add an ignore text pattern such as `Last refreshed: .*`.'],
     ['**The AI tab says AI is not configured**', 'Ask your administrator to enable AI analysis.'],

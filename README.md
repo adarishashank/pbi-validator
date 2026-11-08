@@ -88,7 +88,7 @@ npx playwright install chromium
 npm start                         # http://127.0.0.1:4400
 ```
 
-1. **Power BI sign-ins** → *New sign-in* → *Sign in*. A real browser window opens; complete SSO/MFA there and the session is captured. Tick "Stay signed in". Public *publish-to-web* links need no profile. Use separate profiles if A and B live in different tenants.
+1. **Power BI sign-ins** → *New sign-in* → *Sign in*. The Microsoft sign-in page is shown live in the website (a headless browser on the server streams pictures and receives your clicks and typing), so it works on servers without a display, including Cloudflare. Complete SSO/MFA there and the session is captured. Tick "Stay signed in". Typed text is never logged. Public *publish-to-web* links need no profile. Use separate profiles if A and B live in different tenants.
 2. **Report links** → add each report URL and pick its profile. Click **Discover** to confirm the link opens and see every page with its visual counts.
 3. **Test suites** → *New suite* → choose A and B, the scenarios, limits and tolerances.
 4. **Run now** → watch it live, then review results (filter by status, scenario or page; press ← → to step through differences). **Download PDF** for a shareable report (summary, AI analysis, every issue with screenshots, appendix of all checks), or use **Export** for an **Excel workbook (.xlsx)**, a **standalone HTML report (.zip)**, **JSON** or **JUnit XML**. The Runs page exports the run list to Excel and has a PDF button per run.
@@ -129,7 +129,7 @@ Create the administrator account (locally) and set `API_TOKEN` before exposing t
 
 ## Production deployment
 * **Configuration**: `.env` (see `.env.example`). Binds to `127.0.0.1` by default. Everyone signs in with their own account (see *Accounts*); CI uses a personal API key or `API_TOKEN` as `Authorization: Bearer <token>`.
-* **Docker**: `docker build -t pbi-validator . && docker run -p 4400:4400 -v pbi-data:/data -e API_TOKEN=… pbi-validator`. Containers have no display, so sign in on a workstation (`npm run login -- "<profile>"`) and use **Import** on the Power BI sign-ins page.
+* **Docker**: `docker build -t pbi-validator . && docker run -p 4400:4400 -v pbi-data:/data -e API_TOKEN=… pbi-validator`. Containers have no display: use *Sign in* (it works from the website), or sign in on a workstation (`npm run login -- "<profile>"`) and use **Import**.
 * **Data**: SQLite (WAL) plus PNG artifacts in `DATA_DIR`. Runs older than `RUN_RETENTION_DAYS` are purged nightly. Session files are written with `0600` permissions and refreshed after each successful run. Treat `DATA_DIR/auth` as a secret.
 * **Robustness**: runs are snapshotted (later edits don't change history), queued (`MAX_PARALLEL_RUNS`), cancellable, and marked as interrupted if the server restarts. Sessions that hit the Microsoft login page fail fast with a clear "sign in again" message, and the profile is flagged.
 * **Security**: CSP, `X-Frame-Options`, `nosniff`, `no-referrer`; inputs validated with zod; report URLs with `?r=` tokens are redacted in logs.

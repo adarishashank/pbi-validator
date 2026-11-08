@@ -105,7 +105,7 @@ const ACTIONS = [
   ['POST', /^\/reports\/(\d+)\/discover$/, 'report.discover'],
   ['POST', /^\/reports\/(\d+)\/model$/, 'report.upload_model'], ['DELETE', /^\/reports\/(\d+)\/model$/, 'report.remove_model'],
   ['POST', /^\/profiles$/, 'profile.create'], ['PUT', /^\/profiles\/(\d+)$/, 'profile.update'], ['DELETE', /^\/profiles\/(\d+)$/, 'profile.delete'],
-  ['POST', /^\/profiles\/(\d+)\/login$/, 'profile.sign_in'], ['POST', /^\/profiles\/(\d+)\/check$/, 'profile.check'],
+  ['POST', /^\/profiles\/(\d+)\/login$/, 'profile.sign_in'], ['POST', /^\/profiles\/(\d+)\/remote$/, 'profile.sign_in_web'], ['DELETE', /^\/profiles\/(\d+)\/remote$/, 'profile.sign_in_cancel'], ['POST', /^\/profiles\/(\d+)\/check$/, 'profile.check'],
   ['POST', /^\/profiles\/(\d+)\/import$/, 'profile.import_session'], ['DELETE', /^\/profiles\/(\d+)\/session$/, 'profile.sign_out'],
   ['POST', /^\/runs\/(\d+)\/cancel$/, 'run.cancel'], ['POST', /^\/runs\/(\d+)\/rerun$/, 'run.rerun'], ['DELETE', /^\/runs\/(\d+)$/, 'run.delete'],
   ['POST', /^\/runs\/(\d+)\/ai\/analyze$/, 'ai.analyze'], ['POST', /^\/results\/(\d+)\/ai\/explain$/, 'ai.explain'], ['POST', /^\/runs\/(\d+)\/ai\/ask$/, 'ai.ask'],
@@ -130,7 +130,8 @@ export function describeAction(method, path) {
 
 /** Writes an audit entry for every state-changing API call once it completes. */
 export function auditTrail(req, res, next) {
-  if (SAFE.has(req.method) || SELF_AUDITED.has(req.path)) return next();
+  // Clicks and keystrokes of a web sign-in are not audited one by one (and never their text).
+  if (SAFE.has(req.method) || SELF_AUDITED.has(req.path) || /^\/profiles\/\d+\/remote\/input$/.test(req.path)) return next();
   res.on('finish', () => {
     if (res.statusCode === 401 || (res.statusCode === 403 && !req.user)) return;
     const { action, target } = describeAction(req.method, req.path);
