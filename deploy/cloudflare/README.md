@@ -55,6 +55,7 @@ Add these repository secrets (*Settings → Secrets and variables → Actions*):
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | the R2 API token from step 3 above |
 | `APP_API_TOKEN` | any long random string (admin Bearer token and first-run setup token) |
 | `NVIDIA_API_KEY` | optional, enables AI analysis |
+| `PBI_TENANT_ID`, `PBI_CLIENT_ID`, `PBI_CLIENT_SECRET` | optional: an Entra ID app (service principal) with *Build* access to the semantic models, for data model comparison through the Power BI API |
 
 Until they're all set the workflow skips with a notice. To start with your
 existing accounts and runs, copy them once: `./deploy/cloudflare/deploy.sh --seed-only`.

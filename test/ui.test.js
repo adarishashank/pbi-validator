@@ -279,13 +279,48 @@ test('editor accepts a difference as expected; trends and dashboard charts show 
   await signOut();
 });
 
+test('"What changed" drills from report to page to visual values; model files upload on report links', { timeout: 120_000 }, async () => {
+  await signIn(EDITOR.email, EDITOR.password);
+  await page.waitForSelector('h1:text-is("Dashboard")');
+  await nav('/runs');
+  await page.click('tr.click');
+  await page.click('.tabs button:has-text("What changed")');
+  await page.waitForSelector('.callout:has-text("pages: 1 removed, 1 renamed")');
+  assert.match(await page.locator('.kpi:has-text("Pages changed") .v').textContent(), /^\d+$/);
+  // Report → page → visual → values.
+  await page.click('.chg-tile:has-text("Overview")');
+  await page.waitForSelector('.crumbs:has-text("Overview")');
+  await page.click('.chg-visual button.linkish:has-text("Total Sales")');
+  await page.waitForSelector('table.dt-vals td.add');
+  await page.click('.chg-visual:has-text("Total Sales") button:has-text("Open check")');
+  await page.waitForSelector('.modal table.dt');
+  await page.waitForTimeout(300); // let the window finish opening (it listens for Escape)
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.modal', { state: 'detached' });
+  await page.click('.chg-tile:has-text("Archive")');
+  await page.waitForSelector('.callout.err:has-text("only in A")');
+  // The data model panel explains why it wasn't compared (no model file yet).
+  await page.waitForSelector('.panel:has(h3:text-is("Data model")):has-text("Upload a .pbit")');
+
+  // Upload a model file on a report link.
+  await nav('/reports');
+  const bim = path.join(os.tmpdir(), `pbiv-ui-${process.pid}.bim`);
+  fs.writeFileSync(bim, JSON.stringify({ model: { tables: [{ name: 'Sales', columns: [{ name: 'Amount', dataType: 'decimal' }], measures: [{ name: 'Total Sales', expression: 'SUM(Sales[Amount])' }] }] } }));
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('tr').nth(1).locator('button:has-text("Upload model")').click();
+  await (await chooser).setFiles(bim);
+  await page.waitForSelector('td:has-text("1 table · 1 measure · 0 relationships")');
+  fs.rmSync(bim, { force: true });
+  await signOut();
+});
+
 test('audit log shows who did what; no browser errors anywhere', { timeout: 60_000 }, async () => {
   await signIn(ADMIN.email, ADMIN.password);
   await page.waitForSelector('h1:has-text("Dashboard")');
   await nav('/admin/audit');
   await page.waitForSelector('table.t');
   const text = await page.locator('table.t').textContent();
-  for (const action of ['setup.first_admin', 'user.create', 'login.success', 'login.failed', 'account.change_password', 'report.create', 'suite.create', 'suite.run', 'user.reset_password', 'result.accept']) {
+  for (const action of ['setup.first_admin', 'user.create', 'login.success', 'login.failed', 'account.change_password', 'report.create', 'suite.create', 'suite.run', 'user.reset_password', 'result.accept', 'report.upload_model']) {
     assert.ok(text.includes(action), `audit log lists ${action}`);
   }
   assert.deepEqual(pageErrors, [], 'no JavaScript errors in the browser');

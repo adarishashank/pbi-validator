@@ -204,9 +204,9 @@ export class PbiReport {
     return this.pages[i]?.name ?? null;
   }
 
-  async gotoPage(ref) {
+  async gotoPage(ref, { force = false } = {}) {
     const target = this.pages.find((p) => p.index === ref.index) || ref;
-    if ((await this.currentPageIndex()) === target.index) return;
+    if (!force && (await this.currentPageIndex()) === target.index) return;
     if (this.navStrategy === 'items') {
       const item = this.frame.locator(this.pageItemSelector).nth(target.index);
       if (!(await item.isVisible().catch(() => false))) {
@@ -215,7 +215,8 @@ export class PbiReport {
           if (await tog.isVisible().catch(() => false)) { await tog.click({ timeout: 5000 }).catch(() => {}); await sleep(400); break; }
         }
       }
-      if (await item.isVisible().catch(() => false)) await item.click({ timeout: this.cfg.timing.actionTimeoutMs }).catch(() => item.dispatchEvent('click'));
+      if (force) { await item.dispatchEvent('click').catch(() => {}); await sleep(300); }
+      else if (await item.isVisible().catch(() => false)) await item.click({ timeout: this.cfg.timing.actionTimeoutMs }).catch(() => item.dispatchEvent('click'));
       else await item.dispatchEvent('click');
       await this.waitForPageIndex(target.index, 8000);
       if ((await this.currentPageIndex()) !== target.index) {
@@ -360,6 +361,30 @@ export class PbiReport {
       }
     }
     await this.page.keyboard.press('Escape').catch(() => {});
+    return null;
+  }
+
+  /** Hovers (then, if nothing opened, clicks) a context-menu item; returns the items of the submenu it opened. */
+  async openSubmenu(pattern) {
+    const re = new RegExp(pattern, 'i');
+    const before = await this.frame.evaluate(contextMenuInPage, { selector: this.sel.contextMenuItem });
+    const items = this.frame.locator(this.sel.contextMenuItem);
+    const n = await items.count();
+    for (let i = 0; i < n; i++) {
+      const it = items.nth(i);
+      const label = ((await it.textContent().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      if (!re.test(label) || !(await it.isVisible().catch(() => false))) continue;
+      const known = new Set(before.map((b) => b.label));
+      await it.hover({ timeout: this.cfg.timing.actionTimeoutMs }).catch(() => {});
+      await sleep(500);
+      let after = await this.frame.evaluate(contextMenuInPage, { selector: this.sel.contextMenuItem });
+      if (!after.some((a) => !known.has(a.label))) {
+        await it.click({ timeout: this.cfg.timing.actionTimeoutMs }).catch(() => {});
+        await sleep(500);
+        after = await this.frame.evaluate(contextMenuInPage, { selector: this.sel.contextMenuItem });
+      }
+      return after.filter((a) => !known.has(a.label));
+    }
     return null;
   }
 

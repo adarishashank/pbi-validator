@@ -3,6 +3,7 @@ import { Badge, Progress, Modal, Menu, act, confirmDialog, zoom, Spinner } from 
 import { Topbar } from './common.js';
 import { AiInsights, AiChat, VisionPanel } from './ai.js';
 import { PublishControl } from './publish.js';
+import { WhatChanged } from './changes.js';
 
 const PROBLEM = new Set(['fail', 'error', 'missing', 'diff', 'warn']);
 const img = (runId, f) => `/artifacts/runs/${runId}/${f}`;
@@ -271,6 +272,7 @@ export function RunDetail({ id }) {
       </div>
 
       <div class="tabs" style="margin:0">
+        ${reps.B && !live && html`<button class=${tab === 'changes' ? 'on' : ''} onClick=${() => setTab('changes')}>What changed</button>`}
         <button class=${tab === 'results' ? 'on' : ''} onClick=${() => setTab('results')}>Results</button>
         <button class=${tab === 'ai' ? 'on' : ''} onClick=${() => setTab('ai')}>🤖 AI insights${ai?.summary?.content?.risk ? ` · ${ai.summary.content.risk}` : ''}</button>
         <button class=${tab === 'ask' ? 'on' : ''} onClick=${() => setTab('ask')}>Ask AI</button>
@@ -306,6 +308,7 @@ export function RunDetail({ id }) {
           <td>${Object.values(m).reduce((a, b) => a + b, 0)}</td></tr>`)}
       </tbody></table></div>`}
 
+      ${tab === 'changes' && html`<${WhatChanged} run=${run} version=${results.map((r) => r.status).join('')} onOpen=${(rid) => { const r = results.find((x) => x.id === rid); if (r) openResult(r, results); }} />`}
       ${tab === 'ai' && html`<${AiInsights} run=${run} ai=${ai} onOpenRef=${openRef} reload=${reloadAi} />`}
       ${tab === 'ask' && html`<${AiChat} run=${run} ai=${ai} onOpenRef=${openRef} />`}
       ${tab === 'logs' && html`<div class="logs" ref=${logRef}>${logs.map((l) => html`<div class=${l.level}><span class="ts">${(l.ts || '').slice(11, 19)}</span>${l.message}</div>`)}</div>`}

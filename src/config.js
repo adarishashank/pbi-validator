@@ -43,6 +43,7 @@ export const config = {
   runsDir: path.join(DATA_DIR, 'runs'),
   authDir: path.join(DATA_DIR, 'auth'),
   discoveryDir: path.join(DATA_DIR, 'discovery'),
+  modelsDir: path.join(DATA_DIR, 'models'),
   maxParallelRuns: int(process.env.MAX_PARALLEL_RUNS, 1),
   headless: bool(process.env.HEADLESS, true),
   // Optional shared secret. When set, every /api request must send it as
@@ -51,6 +52,14 @@ export const config = {
   runRetentionDays: int(process.env.RUN_RETENTION_DAYS, 30),
   loginUrl: process.env.PBI_LOGIN_URL || 'https://app.powerbi.com/home',
   logLevel: process.env.LOG_LEVEL || 'info',
+  // Optional service principal for reading data models through the Power BI
+  // REST API (model comparison). Without it, the signed-in Power BI session of
+  // the report link is used; uploaded model files work without either.
+  powerbi: {
+    tenantId: process.env.PBI_TENANT_ID || '',
+    clientId: process.env.PBI_CLIENT_ID || '',
+    clientSecret: process.env.PBI_CLIENT_SECRET || '',
+  },
   // User accounts (email + password). PUBLIC_URL can also be set in Admin → Settings;
   // the environment variable takes precedence and locks the field.
   auth: {
@@ -78,6 +87,6 @@ export const config = {
   },
 };
 
-for (const dir of [config.dataDir, config.runsDir, config.authDir, config.discoveryDir]) {
+for (const dir of [config.dataDir, config.runsDir, config.authDir, config.discoveryDir, config.modelsDir]) {
   fs.mkdirSync(dir, { recursive: true });
 }

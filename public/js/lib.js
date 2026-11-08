@@ -151,5 +151,5 @@ export const STATUS_ORDER = ['fail', 'error', 'missing', 'diff', 'warn', 'accept
 export const STATUS_LABEL = { pass: 'Pass', diff: 'Diff', fail: 'Fail', missing: 'Missing', error: 'Error', warn: 'Warn', accepted: 'Accepted', skipped: 'Skipped' };
 export const SCENARIO_LABEL = {
   report_pages: 'Pages', health: 'Health', page_render: 'Page render', structure: 'Layout', visual: 'Visual',
-  button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',
+  button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', drill_through: 'Drill-through', model: 'Data model', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',
 };

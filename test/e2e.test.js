@@ -30,9 +30,19 @@ after(() => { server.close(); fs.rmSync(tmp, { recursive: true, force: true }); 
 
 const FAST = { timing: { settleMs: 250, stableTimeoutMs: 15000, loadTimeoutMs: 30000 }, viewport: { width: 1400, height: 800 } };
 
-async function runSuite(name, urlA, urlB, cfg = {}) {
+// Model files for the two practice reports: B changes one measure's DAX and adds one.
+const model = (b) => ({ model: { tables: [{ name: 'Sales', columns: [{ name: 'Amount', dataType: 'decimal' }],
+  measures: [{ name: 'Total Sales', expression: b ? 'SUM ( Sales[Amount] ) * 1.001' : 'SUM ( Sales[Amount] )' }, ...(b ? [{ name: 'New KPI', expression: '42' }] : [])] }] } });
+
+async function runSuite(name, urlA, urlB, cfg = {}, models = null) {
   const a = db.insert('reports', { name: `${name} A`, url: urlA });
   const b = db.insert('reports', { name: `${name} B`, url: urlB });
+  if (models) {
+    const { snapshotFromUpload } = await import('../src/model/snapshot.js');
+    for (const [id, m] of [[a, models.A], [b, models.B]]) {
+      fs.writeFileSync(path.join(tmp, 'models', `report-${id}.json`), JSON.stringify(snapshotFromUpload(Buffer.from(JSON.stringify(m)), 'model.bim')));
+    }
+  }
   const sid = db.insert('suites', { name, mode: 'compare', report_a_id: a, report_b_id: b, config: JSON.stringify({ ...FAST, ...cfg }) });
   const runId = queue.runQueue.enqueue(sid, 'test');
   const status = await queue.runQueue.waitFor(runId);
@@ -44,7 +54,7 @@ const find = (rs, scenario, pred = () => true) => rs.filter((r) => r.scenario ==
 let regressionRunId;
 
 test('A vs B: every scenario detects the planted regressions', { timeout: 600000 }, async () => {
-  const { runId, status, results } = await runSuite('regressions', `${base}?v=a`, `${base}?v=b`);
+  const { runId, status, results } = await runSuite('regressions', `${base}?v=a`, `${base}?v=b`, {}, { A: model(false), B: model(true) });
   regressionRunId = runId;
   const dump = () => results.map((r) => `${r.status.padEnd(7)} ${r.scenario.padEnd(13)} ${r.page} :: ${r.title}`).join('\n');
   assert.equal(status, 'failed', dump());
@@ -78,7 +88,18 @@ test('A vs B: every scenario detects the planted regressions', { timeout: 600000
   const drills = find(results, 'drill');
   assert.ok(drills.some((r) => /Expand all down one level/.test(r.title)), dump());
   assert.ok(drills.some((r) => /Drill down on/.test(r.title)), dump());
-  assert.ok(drills.every((r) => r.status === 'diff'), 'city-level values differ after drilling');
+  assert.ok(drills.every((r) => r.status === 'diff'), 'city- and store-level values differ after drilling');
+  // Two levels deep: Region → City → Store, on the drilled member's path.
+  const deep = drills.find((r) => /Drill down on "100" › "\d+" \(level 2\)/.test(r.title));
+  assert.ok(deep, `level-2 drill recorded: ${drills.map((r) => r.title).join(' | ')}`);
+  assert.equal(deep.details.level, 2);
+  assert.ok(drills.some((r) => /Expand all down one level.*\(level 2\)/.test(r.title)), 'expand-all followed to level 2');
+  // Drill-through to the hidden "Region detail" page: Orders differ (12 vs 13).
+  const dt = find(results, 'drill_through');
+  assert.equal(dt.length, 1, dump());
+  assert.match(dt[0].title, /→ "Region detail"/);
+  assert.equal(dt[0].status, 'diff', JSON.stringify(dt[0].details).slice(0, 400));
+  assert.ok(dt[0].details.dataDiffs.some((d) => d.visual.includes('Orders')));
 
   const matrix = find(results, 'matrix_expand')[0];
   assert.ok(matrix, dump());
@@ -94,12 +115,35 @@ test('A vs B: every scenario detects the planted regressions', { timeout: 600000
   const tips = find(results, 'tooltip', (r) => r.details.linesA?.length && r.details.linesB?.length);
   assert.ok(tips.length >= 2, `tooltips captured & compared: ${dump()}`);
   assert.ok(tips.every((r) => r.status === 'pass'), 'first data point tooltip is identical in A and B');
+  // Data model: one DAX change, one measure only in B.
+  const mod = find(results, 'model');
+  assert.equal(mod.find((r) => r.target === 'model').status, 'diff', dump());
+  assert.ok(mod.some((r) => /^Measure \[Total Sales\] changed: DAX/.test(r.title)));
+  assert.ok(mod.some((r) => /^Measure \[New KPI\] added in B/.test(r.title)));
+
+  // "What changed" summary of the real run.
+  const { runChanges } = await import('../src/jobs/changes.js');
+  const ch = runChanges(runId);
+  assert.deepEqual(ch.report.removed, ['Archive']);
+  assert.deepEqual(ch.report.renamed, [{ a: 'Trends', b: 'Trend Analysis' }]);
+  const ov = ch.pages.find((p) => p.name === 'Overview');
+  assert.equal(ov.state, 'changed');
+  assert.ok(ov.values.some((v) => v.visual.includes('Total Sales') && v.changes.some((c) => c.op === 'chg')), JSON.stringify(ov.values).slice(0, 400));
+  assert.ok(ov.interactions.some((i) => i.scenario === 'drill_through'));
+  const det = ch.pages.find((p) => p.name === 'Details');
+  assert.deepEqual(det.layout.map((l) => l.change).sort(), ['added', 'removed']);
+  assert.equal(ch.pages.find((p) => p.name === 'Archive').state, 'removed');
+  assert.equal(ch.report.model.changes.length, 2);
+  assert.match(ch.report.headline, /pages: 1 removed, 1 renamed/);
+
   assert.equal(find(results, 'error').length, 0);
   assert.equal(results.filter((r) => r.status === 'error').length, 0, dump());
 });
 
 test('A vs A: identical reports produce no differences (no false positives)', { timeout: 600000 }, async () => {
-  const { status, results } = await runSuite('identical', `${base}?v=a`, `${base}?v=a`);
+  const { status, results } = await runSuite('identical', `${base}?v=a`, `${base}?v=a`, {}, { A: model(false), B: model(false) });
+  assert.equal(find(results, 'model').length, 1, 'identical models: one passing model check');
+  assert.equal(find(results, 'model')[0].status, 'pass');
   const bad = results.filter((r) => !['pass', 'skipped', 'warn'].includes(r.status));
   assert.deepEqual(bad.map((r) => `${r.status} ${r.scenario} ${r.title} ${JSON.stringify(r.details).slice(0, 300)}`), []);
   assert.equal(status, 'passed');
@@ -117,6 +161,10 @@ test('exports: PDF report and Excel workbook are built from a real run', { timeo
   assert.match(htmlDoc, /Checks needing attention/);
   assert.match(htmlDoc, /Go to Details/);
   assert.match(htmlDoc, /<img src="/, 'problem screenshots embedded');
+  assert.match(htmlDoc, /<h2>What changed<\/h2>/);
+  assert.match(htmlDoc, /lvl lvl-high">Removed/, 'Archive page shown as removed');
+  assert.match(htmlDoc, /<h3>Data model<\/h3>/);
+  assert.match(htmlDoc, /Value changes \(\d+\)/);
 
   const pdf = await renderRunPdf(bundle);
   assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
@@ -124,7 +172,9 @@ test('exports: PDF report and Excel workbook are built from a real run', { timeo
   assert.ok(!fs.readdirSync(path.join(tmp, 'runs', String(regressionRunId))).some((f) => f.startsWith('.print-')), 'temp print file cleaned up');
 
   const sheets = runSheets(bundle);
-  assert.deepEqual(sheets.map((s) => s.name), ['Summary', 'Checks']);
+  const names = sheets.map((x) => x.name);
+  for (const n of ['What changed', 'Model changes', 'Value changes']) assert.ok(names.includes(n), `${n} sheet: ${names}`);
+  assert.deepEqual(sheets.map((s) => s.name), ['Summary', 'Checks', 'What changed', 'Model changes', 'Value changes']);
   assert.equal(sheets[1].rows.length, bundle.results.length);
   const xlsx = await xlsxBuffer(sheets);
   assert.equal(xlsx.subarray(0, 2).toString(), 'PK', 'xlsx is a zip');

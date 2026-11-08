@@ -8,13 +8,16 @@ const SCENARIOS = [
   ['visuals', 'Every visual', 'Per-visual screenshot diff + extracted data (cards, tables, matrices, chart points)'],
   ['buttons', 'Buttons & navigators', 'Clicks action buttons, page/bookmark navigators; verifies destination & resulting state'],
   ['slicers', 'Slicers', 'Applies slicer values and compares the whole filtered page + data'],
-  ['drill', 'Hierarchy drill', 'Drill down / expand-all / next-level on hierarchical visuals'],
+  ['drill', 'Hierarchy drill', 'Drills down / expands hierarchies level by level (e.g. Year → Quarter → Month) and compares every level'],
+  ['drillThrough', 'Drill-through', 'Right-click → Drill through to each target page and compares the page each report lands on'],
   ['matrixExpand', 'Matrix +/- expand', 'Expands matrix row groups and compares the expanded data'],
   ['crossFilter', 'Cross-filtering', 'Clicks data points and compares how the rest of the page reacts'],
   ['tooltips', 'Tooltips', 'Hovers data points and compares tooltip content'],
+  ['model', 'Data model', 'Compares tables, columns, measures (DAX), relationships and security roles of the two semantic models (uploaded model file or Power BI API)'],
 ];
 const LIMITS = [
   ['slicerValues', 'Values per slicer', 0, 20], ['buttonsPerPage', 'Buttons per page', 0, 100], ['drillPerPage', 'Drill visuals per page', 0, 50],
+  ['drillDepth', 'Drill depth (levels)', 1, 5], ['drillPoints', 'Data points drilled per visual', 1, 5], ['drillThroughPerPage', 'Drill-through targets per page', 0, 20],
   ['crossFilterPerPage', 'Cross-filter visuals per page', 0, 50], ['tooltipsPerPage', 'Tooltip visuals per page', 0, 50], ['matrixExpandRows', 'Matrix rows to expand', 1, 20],
 ];
 

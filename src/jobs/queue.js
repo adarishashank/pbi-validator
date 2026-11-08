@@ -157,7 +157,8 @@ class RunQueue {
       if (!r) continue;
       const statePath = r.auth_profile_id ? profileStatePath(r.auth_profile_id) : null;
       if (statePath && !fs.existsSync(statePath)) log('warn', `Auth profile for report ${side} has no saved session – opening anonymously`);
-      reports[side] = { name: r.name, url: r.url, statePath };
+      const modelPath = path.join(config.modelsDir, `report-${r.id}.json`);
+      reports[side] = { name: r.name, url: r.url, statePath, modelPath: fs.existsSync(modelPath) ? modelPath : null };
     }
 
     let status = 'passed';

@@ -57,6 +57,7 @@ export const DEFAULT_SELECTORS = {
     drillDown: '^(drill down|drill-down)$',
     drillUp: '^(drill up|drill-up)$',
     expandNext: '^(expand to next level|show next level|expand)$',
+    drillThrough: '^drill ?-?through$',
   },
 
   // Detects report-level / visual-level failures.

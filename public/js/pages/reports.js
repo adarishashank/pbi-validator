@@ -54,6 +54,47 @@ function Discovery({ report, result }) {
   </${Modal}>`;
 }
 
+const hasIds = (url) => /\/groups\/[\w-]+\/reports\/[0-9a-f-]{36}/i.test(url || '') || /reportEmbed.*reportId=/i.test(url || '');
+
+/** Uploads a data-model file (.pbit, model.bim, .tmdl or zipped TMDL folder) for a report link. */
+async function uploadModel(r, file) {
+  const res = await fetch(`/api/reports/${r.id}/model?filename=${encodeURIComponent(file.name)}`, {
+    method: 'POST', body: file, credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || `${res.status} ${res.statusText}`);
+  return data;
+}
+
+function ModelCell({ r, reload }) {
+  const pick = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pbit,.bim,.json,.tmdl,.zip';
+    input.onchange = async () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      if (await act(() => uploadModel(r, f), `Data model read from ${f.name}`)) reload();
+    };
+    input.click();
+  };
+  const remove = async () => {
+    if (!(await confirmDialog({ title: 'Remove model file?', message: `Stop using "${r.model_file}" for "${r.name}"?${hasIds(r.url) ? ' The model will be read from Power BI instead.' : ''}`, okLabel: 'Remove', danger: true }))) return;
+    if ((await act(() => api(`/reports/${r.id}/model`, { method: 'DELETE' }), 'Model file removed')) !== undefined) reload();
+  };
+  const st = r.model_stats;
+  return html`<div class="small">
+    ${r.model_file ? html`<div><b class="truncate" title=${r.model_file}>${r.model_file}</b></div>
+      ${st && html`<div class="muted">${[[st.tables, 'table'], [st.measures, 'measure'], [st.relationships, 'relationship']].map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`).join(' · ')}</div>`}
+      <div class="muted">uploaded ${fmtAgo(r.model_uploaded_at)}</div>`
+    : hasIds(r.url) ? html`<div class="muted" title="Read through the Power BI REST API during each run (needs Build permission on the semantic model)">From Power BI</div>`
+    : html`<div class="muted" title="Publish-to-web links don't identify the semantic model">Not available: upload a file</div>`}
+    <div class="row" style="gap:4px;margin-top:4px">
+      <button class="btn ed sm ghost" onClick=${pick} title="Upload a .pbit template, model.bim, .tmdl file or a .zip of a TMDL folder">${r.model_file ? 'Replace' : 'Upload model'}</button>
+      ${r.model_file && html`<button class="btn ed sm ghost danger" onClick=${remove}>Remove</button>`}
+    </div></div>`;
+}
+
 export function Reports() {
   const { data, reload } = useApi('/reports');
   const profiles = useApi('/profiles');
@@ -79,7 +120,7 @@ export function Reports() {
     </${Topbar}>
     <div class="content">
       ${list.length === 0 ? html`<div class="panel"><${Empty} title="No report links yet">Add the report you want to validate — typically two copies (e.g. DEV and PROD, or before/after a dataset change).</${Empty}></div>` : html`
-      <div class="panel"><table class="t"><thead><tr><th>Report</th><th>Environment</th><th>Auth</th><th>Last discovery</th><th></th></tr></thead><tbody>
+      <div class="panel"><table class="t"><thead><tr><th>Report</th><th>Environment</th><th>Auth</th><th>Data model</th><th>Last discovery</th><th></th></tr></thead><tbody>
         ${list.map((r) => {
           const d = r.last_discovery;
           return html`<tr>
@@ -87,6 +128,7 @@ export function Reports() {
               ${r.tags && html`<div class="row" style="gap:4px;margin-top:4px">${r.tags.split(',').map((t) => t.trim()).filter(Boolean).map((t) => html`<span class="tag">${t}</span>`)}</div>`}</td>
             <td>${r.environment ? html`<span class="tag">${r.environment}</span>` : html`<span class="muted">—</span>`}</td>
             <td>${r.auth_profile_name ? html`<div class="row" style="gap:6px">${r.auth_profile_name}<${Badge} s=${r.auth_profile_status} /></div>` : html`<span class="muted small">Anonymous</span>`}</td>
+            <td style="max-width:220px"><${ModelCell} r=${r} reload=${reload} /></td>
             <td>${!d ? html`<span class="muted small">Never</span>` : d.ok
               ? html`<span class="row" style="gap:6px"><${Badge} s="pass" label="OK" /><span class="small muted">${d.pages.length} pages · ${fmtAgo(d.at)}</span></span>`
               : html`<span class="row" style="gap:6px"><${Badge} s="fail" label="Failed" /><span class="small muted truncate" style="max-width:240px" title=${d.error}>${d.error}</span></span>`}</td>

@@ -7,14 +7,19 @@ import { runDir } from './queue.js';
 import { describe } from './export.js';
 import { createLogger } from '../logger.js';
 import { config } from '../config.js';
+import { runChanges } from './changes.js';
 
 const logger = createLogger('report');
 
+export const LEVEL_LABEL = { none: 'None', low: 'Low', medium: 'Medium', high: 'High' };
+const PAGE_STATE = { unchanged: 'Unchanged', changed: 'Changed', removed: 'Only in A (removed)', added: 'Only in B (added)' };
+const OP_LABEL = { chg: 'Changed', add: 'Added', del: 'Removed' };
+const MODEL_KIND = { table: 'Table', column: 'Column', measure: 'Measure', relationship: 'Relationship', role: 'Security role', parameter: 'Parameter' };
 export const STATUS_ORDER = ['fail', 'error', 'missing', 'diff', 'warn', 'accepted', 'pass', 'skipped'];
 export const STATUS_LABEL = { pass: 'Pass', diff: 'Diff', fail: 'Fail', missing: 'Missing', error: 'Error', warn: 'Warning', accepted: 'Accepted', skipped: 'Skipped' };
 export const SCENARIO_LABEL = {
   report_pages: 'Pages', health: 'Health', page_render: 'Page render', structure: 'Layout', visual: 'Visual',
-  button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',
+  button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', drill_through: 'Drill-through', model: 'Data model', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',
 };
 const PROBLEM = new Set(['fail', 'error', 'missing', 'diff', 'warn']);
 const RUN_STATUS_LABEL = { passed: 'Passed', failed: 'Failed', diffs: 'Differences found', error: 'Error', cancelled: 'Cancelled', running: 'Running', queued: 'Queued' };
@@ -101,6 +106,48 @@ export function runSheets(bundle) {
       rows: resultRows,
     },
   ];
+  const ch = runChanges(run.id);
+  if (ch && run.snapshot?.reports?.B) {
+    sheets.push({
+      name: 'What changed',
+      columns: [{ key: 'page', header: 'Page', width: 28 }, { key: 'state', header: 'Page status', width: 14 }, { key: 'level', header: 'Change level', width: 13 },
+        { key: 'problems', header: 'Checks needing attention', width: 14 }, { key: 'accepted', header: 'Accepted', width: 10 },
+        { key: 'layout', header: 'Layout changes', width: 50, wrap: true }, { key: 'values', header: 'Values changed', width: 12 },
+        { key: 'interactions', header: 'Interactions that differ', width: 60, wrap: true }, { key: 'pixel', header: 'Page pixels different (%)', width: 14 }],
+      rows: ch.pages.map((p) => ({
+        page: p.renamedTo ? `${p.name} → ${p.renamedTo}` : p.name, state: PAGE_STATE[p.state], level: LEVEL_LABEL[p.level],
+        problems: p.problems, accepted: p.accepted,
+        layout: p.layout.map((l) => `${l.visual}: ${l.change}`).join('\n'),
+        values: p.valuesChanged,
+        interactions: p.interactions.map((i) => `${i.title}: ${i.summary}`).join('\n'),
+        pixel: p.pixel == null ? null : +(p.pixel * 100).toFixed(3),
+      })),
+    });
+    if (ch.report.model?.changes.length) {
+      sheets.push({
+        name: 'Model changes',
+        columns: [{ key: 'status', header: 'Status', width: 10 }, { key: 'kind', header: 'Kind', width: 14 }, { key: 'table', header: 'Table', width: 22 },
+          { key: 'object', header: 'Object', width: 40, wrap: true }, { key: 'change', header: 'Change', width: 14 }, { key: 'fields', header: 'What differs', width: 30, wrap: true },
+          { key: 'a', header: 'A (before)', width: 60, wrap: true }, { key: 'b', header: 'B (after)', width: 60, wrap: true }],
+        rows: ch.report.model.changes.map((c) => ({
+          status: STATUS_LABEL[c.status] || c.status, kind: MODEL_KIND[c.kind] || c.kind, table: c.table || '', object: c.label || c.name,
+          change: c.change === 'added' ? 'Added in B' : c.change === 'removed' ? 'Missing in B' : 'Changed',
+          fields: (c.fields || []).map((f) => f.label).join(', '),
+          a: (c.exprA || (c.fields || []).map((f) => (c.fields.length > 1 ? `${f.label}: ${f.a}` : String(f.a))).join('\n')).slice(0, 30000),
+          b: (c.exprB || (c.fields || []).map((f) => (c.fields.length > 1 ? `${f.label}: ${f.b}` : String(f.b))).join('\n')).slice(0, 30000),
+        })),
+      });
+    }
+    const valueRows = ch.pages.flatMap((p) => p.values.flatMap((v) => v.changes.map((c) => ({ page: p.name, visual: v.visual, change: OP_LABEL[c.op] || c.op, a: c.a ?? '', b: c.b ?? '', status: STATUS_LABEL[v.status] || v.status }))));
+    if (valueRows.length) {
+      sheets.push({
+        name: 'Value changes',
+        columns: [{ key: 'page', header: 'Page', width: 24 }, { key: 'visual', header: 'Visual', width: 40, wrap: true }, { key: 'change', header: 'Change', width: 10 },
+          { key: 'a', header: 'A (before)', width: 40, wrap: true }, { key: 'b', header: 'B (after)', width: 40, wrap: true }, { key: 'status', header: 'Status', width: 10 }],
+        rows: valueRows,
+      });
+    }
+  }
   if (aiRows.length) {
     sheets.push({
       name: 'AI analysis',
@@ -143,6 +190,8 @@ export function runsListSheets(runs) {
 // ======================================================================= PDF
 
 const CSS = `
+.lvl{display:inline-block;min-width:58px;text-align:center;padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.lvl-none{background:#eef0f3;color:#4b5563}.lvl-low{background:#86b6ef;color:#0b2545}.lvl-medium{background:#256abf;color:#fff}.lvl-high{background:#0d366b;color:#fff}
 @page { size: A4; margin: 16mm 14mm 18mm; }
 * { box-sizing: border-box; }
 body { margin: 0; font: 10.5px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #18202b; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -206,6 +255,54 @@ function shotsFor(r, dir, names) {
   return out.slice(0, 2).map(([cap, f]) => [cap, path.basename(f)]);
 }
 
+/** "What changed" section: report-level headline, page heatmap, value changes. */
+function changesHtml(ch) {
+  const t = ch.report.totals;
+  let h = `<h2>What changed</h2><p><b>${esc(ch.report.headline)}</b></p><div class="tiles">
+    <div class="tile"><div class="n">${t.pagesChanged}</div><div class="l">Pages changed${t.pagesA != null ? ` (of ${Math.max(t.pagesA, t.pagesB || 0)})` : ''}</div></div>
+    <div class="tile"><div class="n">${t.visualsAdded}/${t.visualsRemoved}</div><div class="l">Visuals added / removed</div></div>
+    <div class="tile"><div class="n">${t.valuesChanged}</div><div class="l">Values changed</div></div>
+    <div class="tile"><div class="n">${t.interactionsChanged}</div><div class="l">Interactions that differ</div></div></div>`;
+  const rp = ch.report;
+  if (rp.removed.length || rp.added.length || rp.renamed.length) {
+    h += `<p class="small">${rp.removed.length ? `<b>Pages only in A:</b> ${rp.removed.map(esc).join(', ')}. ` : ''}${rp.added.length ? `<b>Pages only in B:</b> ${rp.added.map(esc).join(', ')}. ` : ''}${rp.renamed.length ? `<b>Renamed:</b> ${rp.renamed.map((x) => `${esc(x.a)} → ${esc(x.b)}`).join(', ')}.` : ''}</p>`;
+  }
+  h += `<table><thead><tr><th>Page</th><th>Change</th><th>Need attention</th><th>Layout</th><th>Values changed</th><th>Interactions</th><th>Page pixels</th></tr></thead><tbody>
+    ${ch.pages.map((p) => `<tr><td><b>${esc(p.name)}</b>${p.renamedTo ? `<br><span class="muted small">now "${esc(p.renamedTo)}"</span>` : ''}</td>
+      <td><span class="lvl lvl-${p.level}">${p.state === 'removed' ? 'Removed' : p.state === 'added' ? 'Added' : LEVEL_LABEL[p.level]}</span></td>
+      <td>${p.problems || '<span class="muted">·</span>'}${p.accepted ? ` <span class="muted small">(+${p.accepted} accepted)</span>` : ''}</td>
+      <td class="small">${p.layout.length ? p.layout.slice(0, 6).map((l) => `${esc(l.visual)}: <b>${esc(l.change)}</b>`).join('<br>') : '<span class="muted">·</span>'}</td>
+      <td>${p.valuesChanged || '<span class="muted">·</span>'}</td>
+      <td class="small">${p.interactions.filter((i) => i.status !== 'accepted').slice(0, 4).map((i) => esc(i.title)).join('<br>') || '<span class="muted">·</span>'}</td>
+      <td>${p.pixel == null ? '' : pct(p.pixel)}</td></tr>`).join('')}
+  </tbody></table>`;
+  const md = ch.report.model;
+  if (md) {
+    h += '<h3>Data model</h3>';
+    if (!md.compared) h += `<p class="muted small">${esc(md.note)}</p>`;
+    else {
+      const st = md.info.stats || {};
+      h += `<p class="small">A: ${esc(md.info.sources?.A || '')} · B: ${esc(md.info.sources?.B || '')}</p>
+        <table><thead><tr><th></th><th>Tables</th><th>Columns</th><th>Measures</th><th>Relationships</th><th>Roles</th></tr></thead><tbody>
+        ${['A', 'B'].map((s) => `<tr><td><b>${s}</b></td><td>${st[s]?.tables ?? ''}</td><td>${st[s]?.columns ?? ''}</td><td>${st[s]?.measures ?? ''}</td><td>${st[s]?.relationships ?? ''}</td><td>${st[s]?.roles ?? ''}</td></tr>`).join('')}</tbody></table>`;
+      if (!md.changes.length) h += '<p class="small"><b>The two data models are identical.</b></p>';
+      else {
+        h += `<table><thead><tr><th>Status</th><th>Kind</th><th>Object</th><th>Change</th></tr></thead><tbody>
+          ${md.changes.slice(0, 80).map((c) => `<tr><td><span class="pill s-${esc(c.status)}">${esc(STATUS_LABEL[c.status] || c.status)}</span></td><td>${esc(MODEL_KIND[c.kind] || c.kind)}</td><td class="mono">${esc(c.table && !['table', 'relationship'].includes(c.kind) ? `${c.table} · ${c.label}` : c.label)}</td>
+            <td class="small">${esc(c.change === 'added' ? 'Added in B' : c.change === 'removed' ? 'Missing in B' : `Changed: ${(c.fields || []).map((f) => f.label).join(', ')}`)}</td></tr>`).join('')}
+        </tbody></table>${md.changes.length > 80 ? `<p class="muted small">${md.changes.length - 80} more in the Excel export.</p>` : ''}`;
+      }
+    }
+  }
+  const vals = ch.pages.flatMap((p) => p.values.flatMap((v) => v.changes.map((c) => ({ page: p.name, visual: v.visual, ...c }))));
+  if (vals.length) {
+    h += `<h3>Value changes (${vals.length})</h3><table><thead><tr><th>Page</th><th>Visual</th><th>Change</th><th>A (before)</th><th>B (after)</th></tr></thead><tbody>
+      ${vals.slice(0, 60).map((v) => `<tr><td>${esc(v.page)}</td><td>${esc(v.visual)}</td><td>${OP_LABEL[v.op] || esc(v.op)}</td><td class="mono">${esc(v.a ?? '')}</td><td class="mono">${esc(v.b ?? '')}</td></tr>`).join('')}
+    </tbody></table>${vals.length > 60 ? `<p class="muted small">${vals.length - 60} more in the Excel export.</p>` : ''}`;
+  }
+  return h;
+}
+
 /** Print-ready HTML for one run. Image paths are relative to the run's folder. */
 export function reportHtml(bundle, { maxIssues = 40, maxPageShots = 24, includeImages = true } = {}) {
   const { run, results, ai = {} } = bundle;
@@ -241,6 +338,10 @@ export function reportHtml(bundle, { maxIssues = 40, maxPageShots = 24, includeI
   h += `<table><thead><tr><th>Scenario</th>${STATUS_ORDER.map((s) => `<th>${STATUS_LABEL[s]}</th>`).join('')}<th>Total</th></tr></thead><tbody>
     ${Object.entries(byScenario).map(([sc, m]) => `<tr><td><b>${esc(SCENARIO_LABEL[sc] || sc)}</b></td>${STATUS_ORDER.map((s) => `<td>${m[s] ? `<span class="pill s-${s}">${m[s]}</span>` : '<span class="muted">·</span>'}</td>`).join('')}<td>${Object.values(m).reduce((a, b) => a + b, 0)}</td></tr>`).join('')}
   </tbody></table>`;
+
+  // What changed (comparisons only).
+  const ch = reps.B ? runChanges(run.id) : null;
+  if (ch) h += changesHtml(ch);
 
   // AI analysis.
   h += '<h2>AI analysis</h2>';

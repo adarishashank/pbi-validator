@@ -15,8 +15,8 @@ Automated end-to-end testing of Power BI reports: pages, visuals, numbers and in
 
 - **1. Welcome**: what PBI Report Test does, roles, key terms
 - **2. Onboarding**: getting access, first sign-in, finding your way around, your account
-- **3. Viewer guide**: dashboard, runs, reviewing results, AI insights, exporting, trends
-- **4. Editor guide**: Power BI sign-ins, report links, test suites and schedules, running and reviewing tests, accepting expected differences, sharing
+- **3. Viewer guide**: dashboard, runs, reviewing results, AI insights, exporting, trends, what changed
+- **4. Editor guide**: Power BI sign-ins, report links, test suites and schedules, running and reviewing tests, accepting expected differences, sharing, data models and deeper drilling
 - **5. Troubleshooting**
 - **6. Glossary**
 
@@ -174,7 +174,7 @@ The run page (Figure 8) shows the result, who started it and when at the top, th
 - The run opens on **Problems**: only the checks that need attention. Click **All** to see every check, or a status chip (Fail, Missing, Diff…) to see only those.
 - Below the chips, filter by **scenario** (Visual, Button, Slicer…), by **page**, or search titles.
 - Checks are grouped by report page. Each row shows the status, the scenario, the title, small screenshots and the percentage of pixels that differ.
-- The tabs switch between **Results**, **AI insights**, **Ask AI**, **Coverage** (a table of statuses per scenario) and **Log** (technical progress messages).
+- The tabs switch between **What changed** (comparisons only, see 3.8), **Results**, **AI insights**, **Ask AI**, **Coverage** (a table of statuses per scenario) and **Log** (technical progress messages).
 
 ![A run, filtered to the checks that need attention](images/05-run-problems.jpg)
 *Figure 8. A run, filtered to the checks that need attention*
@@ -252,6 +252,30 @@ To see how a suite is doing over time, click **Trends** on its card in **Test su
 ![Trends for one suite, with a column's details on hover](images/f6-trends.jpg)
 *Figure 12. Trends for one suite, with a column's details on hover*
 
+### 3.8 What changed
+
+For a comparison run, the **What changed** tab answers "what is different in B?" from the top down: the whole report, then each page, then each visual, then the exact values (Figure 13).
+
+- **The headline** sums it up in one line, for example "pages: 1 removed, 1 renamed · visuals: 1 added, 1 removed · 4 value changes in 2 visuals · data model: 5 changes".
+- **The tiles** count pages changed, visuals added or removed, values changed and interactions that behave differently (buttons, slicers, drills, cross-filters, tooltips).
+- **Data model** compares the two semantic models: tables, columns, measures (DAX), relationships and security roles. Click a group, for example **Measures (DAX)**, to list what was added, removed or changed, and **Show the difference** to see the old and new DAX side by side. If the model could not be read, the panel says why; editors can fix that (4.12).
+- **Pages** is a heatmap with one tile per page, from **No change** (grey) to **High** (dark blue). The level is always written on the tile too. "Only in A" means the page was removed or hidden in B; "Trends → Trend Analysis" means it was renamed.
+
+![What changed: headline, totals, data model and the page heatmap](images/f7-what-changed.jpg)
+*Figure 13. What changed: headline, totals, data model and the page heatmap*
+
+Click a page tile to open that page (Figure 14):
+
+- **Layout**: visuals added, removed, moved, resized or retitled.
+- **Visuals**: every visual that looks or reads differently. Click its name to see each changed value, **A (before)** in red and **B (after)** in green. "No data change" means only the picture differs.
+- **Interactions that behave differently**: for example a button that goes to another page, or a drill that shows other numbers at level 2.
+- **Open check** opens the full evidence: screenshots, data and the AI explanation. Click **Report** in the breadcrumb to go back to all pages.
+
+![One page: the changed value of a card, and the interactions that differ](images/f8-what-changed-page.jpg)
+*Figure 14. One page: the changed value of a card, and the interactions that differ*
+
+> **Tip:** The PDF report has the same summary near the top, and the Excel export adds the sheets **What changed**, **Value changes** and **Model changes**.
+
 ## 4. Editor guide
 
 Editors set up and run the tests. Everything in the viewer guide applies to you too.
@@ -267,7 +291,7 @@ Editors set up and run the tests. Everything in the viewer guide applies to you 
 
 ### 4.2 Power BI sign-ins
 
-Secured reports on app.powerbi.com need a Microsoft account to open them. A **Power BI sign-in** stores that session so tests can run unattended (Figure 13).
+Secured reports on app.powerbi.com need a Microsoft account to open them. A **Power BI sign-in** stores that session so tests can run unattended (Figure 15).
 
 1. Go to **Power BI sign-ins** and click **+ New sign-in**. Give it a clear name, for example "Contoso · QA account".
 2. Sign the account in:
@@ -278,7 +302,7 @@ Secured reports on app.powerbi.com need a Microsoft account to open them. A **Po
 3. Click **Check** to confirm the status is **Active**.
 
 ![Power BI sign-ins](images/14-powerbi-signins.jpg)
-*Figure 13. Power BI sign-ins*
+*Figure 15. Power BI sign-ins*
 
 - Use a dedicated test account where possible, not your personal account.
 - If reports A and B live in different tenants, create one sign-in for each.
@@ -286,7 +310,7 @@ Secured reports on app.powerbi.com need a Microsoft account to open them. A **Po
 
 ### 4.3 Report links
 
-Go to **Report links** and click **+ Add report link** (Figures 14 and 15):
+Go to **Report links** and click **+ Add report link** (Figures 16 and 17):
 
 | Field | What to enter |
 |---|---|
@@ -299,14 +323,14 @@ Go to **Report links** and click **+ Add report link** (Figures 14 and 15):
 Click **Discover** on a report link to check it before testing: the tool opens the report and lists its pages with thumbnails, the number of visuals, and the buttons, slicers and charts it found. If it cannot open the report, the message tells you why, for example "Sign-in required".
 
 ![Report links](images/09-report-links.jpg)
-*Figure 14. Report links*
+*Figure 16. Report links*
 
 ![Adding a report link](images/10-add-report-link.jpg)
-*Figure 15. Adding a report link*
+*Figure 17. Adding a report link*
 
 ### 4.4 Test suites
 
-Go to **Test suites** and click **+ New suite** (Figures 16 to 18). The editor has four tabs.
+Go to **Test suites** and click **+ New suite** (Figures 18 to 20). The editor has four tabs.
 
 #### Basics
 
@@ -319,7 +343,7 @@ Go to **Test suites** and click **+ New suite** (Figures 16 to 18). The editor h
 > **Note:** Schedules work even while the website is asleep: it wakes up by itself when a suite is due, runs it, and goes back to sleep. Times are **India Standard Time (Asia/Kolkata)**. If a scheduled run was missed (for example during maintenance), it runs once as soon as possible, unless it is more than 24 hours late. The suite card shows when the next run is due.
 
 ![A new test suite: Basics](images/12-new-suite.jpg)
-*Figure 16. A new test suite: Basics*
+*Figure 18. A new test suite: Basics*
 
 #### Scenarios: what to check
 
@@ -332,15 +356,17 @@ The page inventory (pages added, removed, renamed or reordered) is always checke
 | **Every visual** | A screenshot and the data of each visual (cards, tables, matrices, chart values). |
 | **Buttons & navigators** | Clicks buttons and page/bookmark navigators and checks where they go and what changes. |
 | **Slicers** | Applies slicer values and compares the filtered page and data. |
-| **Hierarchy drill** | Drill down, expand all and next level on hierarchical visuals. |
+| **Hierarchy drill** | Drills down, expands all and goes to the next level on hierarchical visuals, level by level (for example Year → Quarter → Month), and compares every level. |
+| **Drill-through** | Right-clicks a data point → Drill through to each target page, and compares the page each report lands on. |
 | **Matrix +/- expand** | Expands matrix row groups and compares the expanded data. |
 | **Cross-filtering** | Clicks data points and compares how the rest of the page reacts. |
 | **Tooltips** | Hovers data points and compares tooltip content. |
+| **Data model** | Compares the two semantic models: tables, columns, measures (DAX), relationships, security roles and shared queries (see 4.12). |
 
 ![Choosing scenarios, coverage limits and AI options](images/13-suite-scenarios.jpg)
-*Figure 17. Choosing scenarios, coverage limits and AI options*
+*Figure 19. Choosing scenarios, coverage limits and AI options*
 
-On the same tab, **coverage limits** set how much is tested (for example values per slicer or buttons per page): higher is more thorough but slower. **AI analysis** options turn on the automatic AI summary after each run and AI explanations of screenshot differences.
+On the same tab, **coverage limits** set how much is tested (for example values per slicer, buttons per page, **drill depth** and **data points drilled per visual**): higher is more thorough but slower (see 4.12 for how much slower). **AI analysis** options turn on the automatic AI summary after each run and AI explanations of screenshot differences.
 
 #### Tolerances & ignores
 
@@ -356,10 +382,10 @@ Browser size, language, time zone, timeouts and the maximum number of visuals pe
 
 > **Tip:** Start with the defaults and run once. To make sure a suite raises no false alarms, create a copy with the **same report as A and B**: it should pass. Then tune tolerances and ignores to remove noise.
 
-Each suite card (Figure 18) shows its last result and has **▶ Run now**, **History** (its runs), **Edit**, **Duplicate** and **Delete** (past runs are kept).
+Each suite card (Figure 20) shows its last result and has **▶ Run now**, **History** (its runs), **Edit**, **Duplicate** and **Delete** (past runs are kept).
 
 ![Test suites](images/11-suites.jpg)
-*Figure 18. Test suites*
+*Figure 20. Test suites*
 
 ### 4.5 Running a test
 
@@ -384,7 +410,7 @@ Each suite card (Figure 18) shows its last result and has **▶ Run now**, **His
 
 Some differences are intended: a new KPI, a renamed page, numbers restated on purpose. Accept them once so later runs of the suite stop flagging them, and reviewers only see what is new.
 
-1. Open the check in a run and click **✓ Accept as expected** (Figure 19).
+1. Open the check in a run and click **✓ Accept as expected** (Figure 21).
 2. Choose what to accept:
 
    - **This exact difference** (recommended): later runs accept it while the difference stays the same. If the values, behaviour or missing items change again, it is flagged again.
@@ -393,12 +419,12 @@ Some differences are intended: a new KPI, a renamed page, numbers restated on pu
 3. Add a short reason, for example "New KPI added in release 4.2", and click **Accept**.
 
 ![Accepting a difference as expected](images/f2-accept-dialog.jpg)
-*Figure 19. Accepting a difference as expected*
+*Figure 21. Accepting a difference as expected*
 
-The check now shows **Accepted**, with who accepted it, when and why (Figure 20), and the run's result is recounted straight away. Accepted checks are listed separately in the PDF report and marked in the Excel workbook.
+The check now shows **Accepted**, with who accepted it, when and why (Figure 22), and the run's result is recounted straight away. Accepted checks are listed separately in the PDF report and marked in the Excel workbook.
 
 ![An accepted check, with the reason and a Stop accepting button](images/f3-accepted.jpg)
-*Figure 20. An accepted check, with the reason and a Stop accepting button*
+*Figure 22. An accepted check, with the reason and a Stop accepting button*
 
 - To undo, click **Stop accepting** on the check, or open the suite (**Edit**) and use the **Accepted differences** tab, which lists every accepted difference with how often it has matched since.
 - Undoing flags the check again in every run of the suite where it was accepted.
@@ -432,6 +458,45 @@ To start tests from a pipeline (for example after a deployment), create a key in
 
 The response contains the run number; open `/#/runs/<number>` on the website to follow it, or download its results from `/api/runs/<number>/report.pdf`. Delete keys you no longer use.
 
+### 4.12 Data models and deeper drilling
+
+#### Comparing the data models
+
+Many changes never show on screen: a measure's DAX, a relationship's direction, a security role's filter. With the **Data model** scenario on, every comparison run also compares the two semantic models. The model of each report link is read from the first source available:
+
+1. **A model file you upload** on the report link: in **Report links**, click **Upload model** in the Data model column (Figure 23). Accepted files: a Power BI template (**.pbit**: in Power BI Desktop, File → Export → Power BI template), a **model.bim**, a **.tmdl** file, or a **.zip** of a TMDL folder (a Power BI Project's "definition" folder). This works for every kind of link, including publish-to-web. Upload a new file whenever the model changes; **Replace** and **Remove** are next to it.
+2. **The Power BI service**, for app.powerbi.com links that contain the workspace and report (…/groups/…/reports/…): read with the administrator's service principal if one is set up, otherwise with the report link's Power BI sign-in. That account needs **Build** permission on the semantic model.
+
+![Report links with an uploaded model file for each report](images/f9-model-upload.jpg)
+*Figure 23. Report links with an uploaded model file for each report*
+
+Each difference becomes its own check, so you can open it, see the old and new DAX side by side (Figure 24), and **Accept as expected** if it was intended. DAX that was only re-indented or re-spaced is not reported. Security roles are compared only when the account reading the model has administrator rights on it.
+
+![A changed measure: the DAX in A and in B](images/f10-dax-diff.jpg)
+*Figure 24. A changed measure: the DAX in A and in B*
+
+> **Note:** A .pbix file can't be read directly: save it as a template (.pbit) and upload that. Data model checks compare the model's definition, not the data rows in it; the visual and interaction checks cover the numbers.
+
+#### How deep does drilling go, and what does it cost?
+
+In the suite editor (**Scenarios** tab), three limits control drilling:
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Drill depth (levels)** | 2 | How many levels each drill follows, for example 3 for Year → Quarter → Month → Day. At each level the visual is compared again; if one report's hierarchy ends earlier, that is reported. |
+| **Data points drilled per visual** | 1 | Drills on the first data point, or spreads across several (first, middle, last). |
+| **Drill-through targets per page** | 3 | How many drill-through target pages are tried per page. |
+
+Each extra level is one more click and comparison per visual, roughly **3 to 10 seconds** on a real report (A and B drill at the same time). As a guide, for a page with 10 drillable visuals:
+
+| Depth × data points | Extra time per page (approx.) |
+|---|---|
+| 1 × 1 | under a minute |
+| 2 × 1 (default) | 1 to 3 minutes |
+| 3 × 3 | 5 to 15 minutes |
+
+> **Tip:** Keep the defaults for everyday suites. Raise depth and data points on a separate suite limited to the pages where hierarchies matter (Pages to include), and schedule it overnight.
+
 ## 5. Troubleshooting
 
 | What you see | What to do |
@@ -447,6 +512,9 @@ The response contains the run number; open `/#/runs/<number>` on the website to 
 | **An intended change is flagged in every run** | Open the check and click **Accept as expected** (editors, see 4.7). |
 | **A check is "Accepted" but should not be** | Open it and click **Stop accepting**, or use the suite's Accepted differences tab. |
 | **A scheduled run did not happen** | Check the schedule on the suite card (times are India Standard Time). A run more than 24 hours late is skipped rather than run late. |
+| **Data model: "not compared" (Skipped)** | The model could not be identified, for example for a publish-to-web link. An editor uploads a .pbit, model.bim or TMDL file on the report link (4.12). |
+| **Data model: "Could not read the data model" (Warning)** | The account reading it lacks Build permission on the semantic model, or the sign-in expired. Grant access, sign in again, or upload a model file instead. |
+| **Runs got much slower** | Check the suite's drill depth and data points (4.12). Lower them, or limit the pages tested. |
 | **Numbers differ only by rounding** | Set a numeric tolerance on the suite, for example 0.001. |
 | **A "last refreshed" date always differs** | Add an ignore text pattern such as `Last refreshed: .*`. |
 | **The AI tab says AI is not configured** | Ask your administrator to enable AI analysis. |
@@ -464,7 +532,10 @@ For anything else, contact your administrator: **Shashank Adari** (shashank.adar
 | **Baseline** | The version considered correct, usually PROD. |
 | **Candidate** | The version being checked, usually DEV or UAT. |
 | **Cross-filter** | Clicking a data point in one visual to filter the others on the page. |
-| **Drill down / expand** | Moving to a lower level of a hierarchy (for example Year → Month) in a visual. |
+| **DAX** | The formula language of Power BI measures and calculated columns. |
+| **Data model / semantic model** | The tables, relationships, measures and security roles behind a report. |
+| **Drill down / expand** | Moving to a lower level of a hierarchy (for example Year → Month) in a visual. The drill depth sets how many levels are tested. |
+| **Drill-through** | Right-clicking a data point to open a detail page filtered to it. |
 | **Masking** | Painting over an area in both screenshots so it is not compared. |
 | **Noise** | Harmless differences such as anti-aliasing or a refresh timestamp. |
 | **Schedule** | A cron expression on a suite that starts it automatically, for example 0 6 * * 1-5 for weekdays at 06:00 India time. |

@@ -178,6 +178,10 @@ db.exec(`CREATE TABLE IF NOT EXISTS acceptances (
 CREATE INDEX IF NOT EXISTS idx_acceptances_suite ON acceptances(suite_id);`);
 // When a run was published to the Cloudflare Pages results site (NULL = not published).
 if (!hasColumn('runs', 'published_at')) db.exec('ALTER TABLE runs ADD COLUMN published_at TEXT');
+// Uploaded data-model file per report link (snapshot stored in data/models/report-<id>.json).
+if (!hasColumn('reports', 'model_file')) db.exec('ALTER TABLE reports ADD COLUMN model_file TEXT');
+if (!hasColumn('reports', 'model_uploaded_at')) db.exec('ALTER TABLE reports ADD COLUMN model_uploaded_at TEXT');
+if (!hasColumn('reports', 'model_stats')) db.exec('ALTER TABLE reports ADD COLUMN model_stats TEXT');
 if (!hasColumn('users', 'temp_password_expires_at')) db.exec('ALTER TABLE users ADD COLUMN temp_password_expires_at TEXT');
 
 // The database holds password hashes and SSO settings: owner-only access.
@@ -185,7 +189,7 @@ for (const f of [config.dbPath, `${config.dbPath}-wal`, `${config.dbPath}-shm`])
   try { fs.chmodSync(f, 0o600); } catch { /* not created yet */ }
 }
 
-const JSON_COLS = new Set(['config', 'snapshot', 'summary', 'images', 'details', 'last_discovery', 'content', 'detail', 'value']);
+const JSON_COLS = new Set(['config', 'snapshot', 'summary', 'images', 'details', 'last_discovery', 'content', 'detail', 'value', 'model_stats']);
 
 function hydrate(row) {
   if (!row) return row;

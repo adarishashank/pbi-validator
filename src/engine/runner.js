@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import { PbiReport, ReportError } from './pbi.js';
 import { resolveSelectors } from './selectors.js';
 import { anyMatch } from './options.js';
+import { runModelChecks } from '../model/checks.js';
 import { matchPages, matchVisuals, structuralDiff, visualLabel } from './matcher.js';
 import {
   diffImages, cropBuffer, diffLines, makeNormalizer, visualDataLines, quickRatio, annotateBoxes,
@@ -117,6 +118,22 @@ export async function executeRun(ctx) {
         orderChanged,
       },
     });
+
+    // ---------------------------------------------------------- data model
+    if (cfg.scenarios.model) {
+      ctx.progress(0.06, 'Comparing data models');
+      try {
+        await runModelChecks({
+          compare, reports: ctx.reports, record: ctx.record, log,
+          // The Power BI web app keeps the signed-in user's API token in the page.
+          browserToken: (side) => S[side].report.page.evaluate(() => window.powerBIAccessToken || null),
+        });
+      } catch (e) {
+        log('warn', `Data model check failed: ${e.message}`);
+        await ctx.record({ page: '', scenario: 'model', target: 'model', title: 'Data model comparison', status: 'warn', details: { note: `Could not compare the data models: ${e.message}` } });
+      }
+      checkAbort();
+    }
 
     const inScope = (name) => (!cfg.pages.include.length || anyMatch(cfg.pages.include, name)) && !anyMatch(cfg.pages.exclude, name);
     const pairs = pm.pairs.filter((p) => inScope(p.a.name));
@@ -435,7 +452,12 @@ async function processPage(env) {
   frac(0.55);
 
   // Hierarchy drill -------------------------------------------------------
+  // Follows each drill path down cfg.limits.drillDepth levels (e.g. Year →
+  // Quarter → Month), on up to cfg.limits.drillPoints data points per visual,
+  // comparing the visual at every level. The deepest level reached in A and B
+  // must match too.
   if (cfg.scenarios.drill && cfg.limits.drillPerPage > 0) {
+    const depth = cfg.limits.drillDepth;
     const charts = pairsWhere((v) => isChart(v) || isType(v, 'matrix')).slice(0, cfg.limits.drillPerPage);
     for (const p0 of charts) {
       const ops = [];
@@ -443,34 +465,115 @@ async function processPage(env) {
       if (hdr.expandAll && !hdr.expandAll.disabled) ops.push({ kind: 'expandAll', label: hdr.expandAll.label || 'Expand all down one level' });
       if (hdr.nextLevel && !hdr.nextLevel.disabled) ops.push({ kind: 'nextLevel', label: hdr.nextLevel.label || 'Go to the next level' });
       if (isChart(p0.a)) {
-        const pts = await S.A.report.dataPoints(p0.a, 1);
+        const pts = await S.A.report.dataPoints(p0.a, 50);
         if (pts[0]) {
           const menu = await S.A.report.contextMenuAt(pts[0].x, pts[0].y).catch(() => []);
           await S.A.report.page.keyboard.press('Escape').catch(() => {});
           const dd = menu.find((m) => new RegExp(sel.contextMenuLabels.drillDown, 'i').test(m.label) && !m.disabled);
-          if (dd) ops.push({ kind: 'drillDown', label: `Drill down on "${pts[0].label}"` });
+          if (dd) {
+            for (const [i, pt] of spread(pts, cfg.limits.drillPoints).entries()) {
+              ops.push({ kind: 'drillDown', point: pt.label, first: i === 0, label: `Drill down on "${pt.label}"` });
+            }
+          }
           const ex = menu.find((m) => new RegExp(sel.contextMenuLabels.expandNext, 'i').test(m.label) && !m.disabled);
           if (ex && !ops.some((o) => o.kind === 'expandAll' || o.kind === 'nextLevel')) ops.push({ kind: 'ctxExpand', label: ex.label });
         }
       }
       if (!ops.length && isChart(p0.a) && hdr.drillMode && !hdr.drillMode.disabled) ops.push({ kind: 'drillMode', label: 'Drill mode + click first data point' });
       await S.A.report.parkMouse();
+      const undo = async (s) => {
+        const p = state.byKey.get(p0.key);
+        const v = p && (s.name === 'A' ? p.a : p.b);
+        if (!v) return;
+        for (let i = 0; i < depth + 1; i++) if (!(await s.report.clickHeader(v, 'drillUp').catch(() => false))) break; else await s.report.waitStable({ timeout: 10000 });
+        await s.report.clickHeader(v, 'drillMode').catch(() => {});
+      };
       for (const op of ops) {
-        await scenario({ scenario: 'drill', target: `${p0.key}:${op.kind}`, title: `${op.label} · ${visualLabel(p0.a)}` }, async () => {
-          const p = state.byKey.get(p0.key);
-          if (!p) return { status: 'skipped', details: { note: 'Visual no longer present' } };
-          const ok = {};
-          await both(async (s) => { ok[s.name] = await performDrill(s.report, s.name === 'A' ? p.a : p.b, op, sel); });
-          if (!ok.A) throw new Error(`Drill control "${op.label}" could not be executed on A`);
-          return visualAfterAction(both, p, op, ok);
-        }, { undo: async (s) => {
-          const p = state.byKey.get(p0.key);
-          const v = p && (s.name === 'A' ? p.a : p.b);
-          if (!v) return;
-          for (let i = 0; i < 3; i++) if (!(await s.report.clickHeader(v, 'drillUp').catch(() => false))) break; else await s.report.waitStable({ timeout: 10000 });
-          if (op.kind === 'drillMode') await s.report.clickHeader(v, 'drillMode').catch(() => {});
-        } });
+        const path = [];
+        let go = true;
+        for (let level = 1; level <= depth && go; level++) {
+          go = false;
+          const baseTarget = `${p0.key}:${op.kind}${op.kind === 'drillDown' && !op.first ? `@${op.point}` : ''}`;
+          const meta = {
+            scenario: 'drill',
+            target: level === 1 ? baseTarget : `${baseTarget}>L${level}`,
+            title: level === 1 ? `${op.label} · ${visualLabel(p0.a)}` : `${op.label} (level ${level}) · ${visualLabel(p0.a)}`,
+          };
+          await scenario(meta, async () => {
+            const p = state.byKey.get(p0.key);
+            if (!p) return { status: 'skipped', details: { note: 'Visual no longer present' } };
+            const ok = {}, point = {};
+            await both(async (s) => {
+              const v = s.name === 'A' ? p.a : p.b;
+              const r = await performDrill(s.report, v, op, sel, { level, point: level === 1 ? op.point : null });
+              ok[s.name] = r.ok;
+              point[s.name] = r.point;
+            });
+            if (!ok.A && !ok.B) {
+              if (level === 1) throw new Error(`Drill control "${op.label}" could not be executed on A`);
+              return null; // bottom of the hierarchy in both reports: path complete
+            }
+            if (!ok.A) {
+              return { status: 'fail', details: { level, executed: ok, note: `B can drill one level deeper than A (level ${level})` } };
+            }
+            const res = await visualAfterAction(both, p, op, ok);
+            res.details.level = level;
+            // Name the member drilled into at each deeper level, e.g. Drill down on "2025" › "Q3" › "Aug" (level 3).
+            if (level > 1) {
+              const trail = [...path, point.A].filter(Boolean);
+              res.title = `${op.label}${trail.length ? ` › ${trail.map((x) => `"${x}"`).join(' › ')}` : ''} (level ${level}) · ${visualLabel(p0.a)}`;
+            }
+            if (!ok.B && compare) res.details.note = level === 1 ? res.details.note : `Level ${level} exists only in A: B's hierarchy ends earlier`;
+            if (ok.B || !compare) { go = true; if (level > 1 && point.A) path.push(point.A); }
+            return res;
+          }, { undo, restore: false });
+        }
+        await restoreAll(undo);
       }
+    }
+  }
+
+  // Drill-through ---------------------------------------------------------
+  // Right-click a data point → Drill through → each target page; compares the
+  // page each report lands on (data and screenshot).
+  if (cfg.scenarios.drillThrough && cfg.limits.drillThroughPerPage > 0) {
+    const targets = [];
+    for (const p0 of pairsWhere(isChart).slice(0, cfg.limits.drillPerPage)) {
+      if (targets.length >= cfg.limits.drillThroughPerPage) break;
+      const pts = await S.A.report.dataPoints(p0.a, 1);
+      if (!pts[0]) continue;
+      await S.A.report.contextMenuAt(pts[0].x, pts[0].y).catch(() => []);
+      const sub = await S.A.report.openSubmenu(sel.contextMenuLabels.drillThrough).catch(() => null);
+      await S.A.report.page.keyboard.press('Escape').catch(() => {});
+      await S.A.report.page.keyboard.press('Escape').catch(() => {});
+      for (const it of (sub || []).filter((x) => !x.disabled && x.label)) {
+        if (targets.length < cfg.limits.drillThroughPerPage) targets.push({ p0, point: pts[0].label, page: it.label });
+      }
+    }
+    await S.A.report.parkMouse();
+    for (const t of targets) {
+      const undo = (s) => s.report.gotoPage(ref[s.name], { force: true });
+      await scenario({ scenario: 'drill_through', target: `${t.p0.key}:dt:${t.page}`, title: `Drill through "${t.point}" → "${t.page}" · ${visualLabel(t.p0.a)}` }, async () => {
+        const p = state.byKey.get(t.p0.key);
+        if (!p) return { status: 'skipped', details: { note: 'Visual no longer present' } };
+        const ok = {};
+        await both(async (s) => {
+          const v = s.name === 'A' ? p.a : p.b;
+          const pts = await s.report.dataPoints(v, 50);
+          const pt = pts.find((x) => x.label === t.point) || pts[0];
+          if (!pt) { ok[s.name] = false; return; }
+          await s.report.contextMenuAt(pt.x, pt.y);
+          const sub = await s.report.openSubmenu(sel.contextMenuLabels.drillThrough);
+          ok[s.name] = !!(sub && sub.some((x) => x.label === t.page) && await s.report.clickMenuItem(`^${escapeRe(t.page)}$`));
+          if (!ok[s.name]) await s.report.page.keyboard.press('Escape').catch(() => {});
+        });
+        if (!ok.A) throw new Error(`Drill-through to "${t.page}" could not be executed on A`);
+        await sleep(1200);
+        const cap = await capturePage();
+        const res = pageVerdict(cap, { executed: ok, targetPage: t.page, dataPoint: t.point });
+        if (compare && !ok.B) { res.status = 'fail'; res.details.note = `Drill-through target "${t.page}" is not available in B`; }
+        return res;
+      }, { undo });
     }
   }
   frac(0.7);
@@ -583,30 +686,50 @@ async function processPage(env) {
   }
 }
 
-async function performDrill(report, v, op, sel) {
-  if (!v) return false;
+/**
+ * Executes one drill step. `point` (level 1 only) picks the data point by its
+ * label so A and B drill on the same member; deeper levels use the first point.
+ * Returns { ok, point } where point is the label drilled on.
+ */
+async function performDrill(report, v, op, sel, { level = 1, point = null } = {}) {
+  if (!v) return { ok: false };
+  const pick = async () => {
+    const pts = await report.dataPoints(v, 50);
+    return (point && pts.find((p) => p.label === point)) || pts[0] || null;
+  };
   switch (op.kind) {
-    case 'expandAll': return report.clickHeader(v, 'expandAll');
-    case 'nextLevel': return report.clickHeader(v, 'nextLevel');
+    case 'expandAll': return { ok: await report.clickHeader(v, 'expandAll') };
+    case 'nextLevel': return { ok: await report.clickHeader(v, 'nextLevel') };
     case 'drillDown':
     case 'ctxExpand': {
-      const pts = await report.dataPoints(v, 1);
-      if (!pts[0]) return false;
-      await report.contextMenuAt(pts[0].x, pts[0].y);
+      const pt = await pick();
+      if (!pt) return { ok: false };
+      const menu = await report.contextMenuAt(pt.x, pt.y);
       const pattern = op.kind === 'drillDown' ? sel.contextMenuLabels.drillDown : sel.contextMenuLabels.expandNext;
-      return !!(await report.clickMenuItem(pattern));
+      if (!menu.some((m) => new RegExp(pattern, 'i').test(m.label) && !m.disabled)) {
+        await report.page.keyboard.press('Escape').catch(() => {});
+        return { ok: false };
+      }
+      return { ok: !!(await report.clickMenuItem(pattern)), point: pt.label };
     }
     case 'drillMode': {
-      if (!(await report.clickHeader(v, 'drillMode'))) return false;
-      await sleep(400);
-      const pts = await report.dataPoints(v, 1);
-      if (!pts[0]) return false;
-      await report.clickAt(pts[0].x, pts[0].y);
-      return true;
+      if (level === 1) {
+        if (!(await report.clickHeader(v, 'drillMode'))) return { ok: false };
+        await sleep(400);
+      }
+      const before = await report.canvasHash().catch(() => null);
+      const pt = await pick();
+      if (!pt) return { ok: false };
+      await report.clickAt(pt.x, pt.y);
+      await report.waitStable({ timeout: 10000 }).catch(() => {});
+      const after = await report.canvasHash().catch(() => null);
+      return { ok: level === 1 || before !== after, point: pt.label };
     }
-    default: return false;
+    default: return { ok: false };
   }
 }
+
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function describeOutcome(o) {
   if (o.popups.length) return `opened ${o.popups.join(', ')}`;

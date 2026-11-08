@@ -11,6 +11,10 @@ import { runSheets, runsListSheets, renderRunPdf } from '../jobs/report.js';
 import { xlsxBuffer } from '../jobs/xlsx.js';
 import { pagesStatus, publishRun, unpublishRun } from '../jobs/pages.js';
 import { acceptResult, revokeAcceptance } from '../jobs/acceptances.js';
+import { runChanges } from '../jobs/changes.js';
+import path from 'node:path';
+import { snapshotFromUpload, modelStats } from '../model/snapshot.js';
+import { servicePrincipalConfigured } from '../model/powerbi.js';
 import { SuiteConfigSchema, DEFAULT_SUITE_CONFIG } from '../engine/options.js';
 import { DEFAULT_SELECTORS } from '../engine/selectors.js';
 import { aiStatus } from '../ai/client.js';
@@ -52,6 +56,7 @@ router.get('/meta', (req, res) => res.json({
   retentionDays: config.runRetentionDays,
   timezone: config.timezone,
   ai: aiStatus(),
+  model: { servicePrincipal: servicePrincipalConfigured() },
 }));
 // When the next scheduled run is due (read by the Cloudflare wake-up timer).
 router.get('/schedules/next', (req, res) => res.json({ next: nextScheduledAt(), timezone: config.timezone }));
@@ -175,8 +180,31 @@ router.delete('/reports/:id', wrap((req, res) => {
   const used = q.all('SELECT name FROM suites WHERE report_a_id = ? OR report_b_id = ?', id, id);
   if (used.length && req.query.force !== '1') throw httpError(409, `Report is used by suite(s): ${used.map((s) => s.name).join(', ')}`);
   q.run('DELETE FROM reports WHERE id = ?', id);
+  fs.rmSync(modelFile(id), { force: true });
   syncSchedules();
   res.status(204).end();
+}));
+// Data-model file for a report link (.pbit, model.bim, .tmdl or a zipped TMDL
+// folder). Sent as the raw request body; ?filename= tells the format.
+const modelFile = (id) => path.join(config.modelsDir, `report-${id}.json`);
+router.post('/reports/:id/model', express.raw({ type: () => true, limit: '100mb' }), wrap((req, res) => {
+  const id = idParam(req); const rep = mustGet('reports', id);
+  if (!Buffer.isBuffer(req.body) || !req.body.length) throw httpError(400, 'Choose a model file to upload');
+  const filename = path.basename(String(req.query.filename || 'model')).slice(0, 200);
+  const snap = snapshotFromUpload(req.body, filename);
+  const stats = modelStats(snap);
+  fs.writeFileSync(modelFile(id), JSON.stringify(snap));
+  update('reports', id, { model_file: filename, model_uploaded_at: nowIso(), model_stats: stats, updated_at: nowIso() });
+  res.locals.auditTarget = rep.name;
+  res.locals.auditDetail = { file: filename, ...stats };
+  res.status(201).json(mustGet('reports', id));
+}));
+router.delete('/reports/:id/model', wrap((req, res) => {
+  const id = idParam(req); const rep = mustGet('reports', id);
+  fs.rmSync(modelFile(id), { force: true });
+  update('reports', id, { model_file: null, model_uploaded_at: null, model_stats: null, updated_at: nowIso() });
+  res.locals.auditTarget = rep.name;
+  res.json(mustGet('reports', id));
 }));
 router.post('/reports/:id/discover', wrap(async (req, res) => {
   const id = idParam(req); mustGet('reports', id);
@@ -308,6 +336,12 @@ router.post('/runs/:id/rerun', wrap((req, res) => {
   const run = mustGet('runs', idParam(req));
   if (!run.suite_id) throw httpError(409, 'The suite for this run was deleted');
   res.status(202).json({ runId: runQueue.enqueue(run.suite_id, 'rerun', req.user?.email || null) });
+}));
+// Report → page → visual → value summary of what changed between A and B.
+router.get('/runs/:id/changes', wrap((req, res) => {
+  const id = idParam(req);
+  mustGet('runs', id);
+  res.json(runChanges(id));
 }));
 router.get('/runs/:id/results', wrap((req, res) => {
   const id = idParam(req);

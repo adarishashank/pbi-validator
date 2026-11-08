@@ -15,7 +15,9 @@ A self-hosted website for **end-to-end validation of Power BI reports**. Add rep
 | **Every visual** | Cropped screenshot + extracted content: card values, table/matrix cells, chart data points and axis labels, slicer items | pixel and **data** differences (line-level diff) |
 | **Buttons & navigators** | Clicks action buttons, page/bookmark navigator items | different destination page, popup vs none, different resulting state |
 | **Slicers** | Applies values (spread across the list) in A and B | different filtered page / data; value missing in B |
-| **Hierarchy drill** | *Expand all down one level*, *Go to next level*, right-click → *Drill down*, drill-mode | different drilled visual / data, control missing in B |
+| **Data model** | Reads both semantic models (uploaded `.pbit` / `model.bim` / TMDL, or the Power BI REST API) | tables, columns, measures (DAX), relationships, row-level security roles and shared queries added, missing or changed |
+| **Hierarchy drill** | *Expand all down one level*, *Go to next level*, right-click → *Drill down*, drill-mode, followed **level by level** (`drillDepth`, default 2: e.g. Year → Quarter → Month) on up to `drillPoints` data points per visual | different drilled visual / data at any level, a hierarchy that ends earlier in one report, control missing in B |
+| **Drill-through** | Right-click a data point → *Drill through* → each target page | different landing page / data, target missing in B |
 | **Matrix +/-** | Expands row groups | different expanded rows / values |
 | **Cross-filtering** | Clicks data points | different reaction of the rest of the page |
 | **Tooltips** | Hovers data points | different tooltip content / rendering |
@@ -43,6 +45,19 @@ Run status: **passed**, **diffs** (only visual/data differences), **failed** (fa
 **Adding people:** Admin → Users → *Add user*. A readable temporary password (e.g. `Kp7m-Wq4x-Hr9t-Bz3c`, no look-alike characters) is **generated automatically**, shown once with a *Copy sign-in instructions* button, and expires after `TEMP_PASSWORD_HOURS` (72 h). The person must choose their own password at first sign-in. Expired or forgotten? *New temporary password* / *Reset password* on the same page.
 
 CLI: `npm run cli -- add-user <email> --role viewer|editor|admin`, `create-admin <email>`, `reset-password <email>` (each prints an automatically generated temporary password and its expiry), `users`. The `API_TOKEN` still works as an admin Bearer token for scripts.
+
+## What changed (report → page → visual → value)
+
+Each comparison run has a **What changed** tab: a one-line headline (pages removed/added/renamed, visuals added/removed, values changed, data-model changes, interactions that behave differently), a **data model** panel, and a **page heatmap** (no change / low / medium / high, always labelled in words). Click a page to see its layout changes, every visual whose data changed with the exact before/after values, and the interactions that differ; *Open check* jumps to the evidence. The PDF has the same summary near the top, and the Excel export adds *What changed*, *Value changes* and *Model changes* sheets.
+
+**How deep does drilling go, and what does it cost?** Each extra drill level is one more click-and-compare per visual: roughly 3–10 s per level per visual on a real report (both reports drill in parallel). With the defaults (10 visuals per page, 2 levels, 1 data point) that's ~1–3 extra minutes per page; 3 levels × 3 data points is ~5–15 minutes per page. Raise `drillDepth`/`drillPoints` on the suites where hierarchies matter, and limit pages with *include/exclude*.
+
+**Data model sources** (first available wins, per report link):
+1. A model file uploaded on the report link (*Report links → Upload model*): `.pbit` template, `model.bim`, a `.tmdl` file or a `.zip` of a TMDL folder (Power BI Project / Fabric Git). Works for publish-to-web links too. A `.pbix` can't be read: save it as a template (`.pbit`).
+2. The Power BI REST API with a **service principal** (`PBI_TENANT_ID`, `PBI_CLIENT_ID`, `PBI_CLIENT_SECRET`; the app needs *Build* permission on the semantic models and the tenant setting allowing service principals to use Power BI APIs).
+3. The Power BI REST API with the **signed-in session** of the report link's Power BI sign-in.
+
+Options 2 and 3 need an app.powerbi.com link with workspace and report IDs (`/groups/…/reports/…`). Security roles are read only with admin rights on the model. Whitespace-only DAX changes are ignored. Every model difference is its own check, so intended changes can be *accepted as expected*.
 
 ## Accepting expected differences, schedules and trends
 
@@ -135,6 +150,6 @@ src/api/      routes.js (REST + SSE) · auth.js · admin.js      public/   Preac
 ```
 
 ## Known limits
-* Data checks read what Power BI renders: visible table/matrix rows (virtualised rows beyond the viewport aren't scrolled), chart data-point labels, and card text. They don't read the dataset itself.
+* Data checks read what Power BI renders: visible table/matrix rows (virtualised rows beyond the viewport aren't scrolled), chart data-point labels, and card text. The data model check compares the model's definition (DAX, columns, relationships), not the rows in it.
 * Range/date slicers are captured in page and visual checks, but values aren't typed into them.
 * Custom visuals that draw on `<canvas>` are compared by pixels only.

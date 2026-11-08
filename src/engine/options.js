@@ -23,14 +23,19 @@ export const SuiteConfigSchema = z.object({
     buttons: z.boolean().default(true),        // action buttons / navigators / bookmarks
     slicers: z.boolean().default(true),        // apply slicer values, compare whole page
     drill: z.boolean().default(true),          // hierarchy drill down / expand next level
+    drillThrough: z.boolean().default(true),   // right-click → Drill through → target page
     matrixExpand: z.boolean().default(true),   // matrix +/- row hierarchy expansion
     crossFilter: z.boolean().default(true),    // click data points, compare cross-filtering
     tooltips: z.boolean().default(true),       // hover data points, compare tooltip content
+    model: z.boolean().default(true),          // compare the data model: tables, columns, measures (DAX), relationships, roles
   }).prefault({}),
   limits: z.object({
     slicerValues: z.number().int().min(0).max(20).default(2),
     buttonsPerPage: z.number().int().min(0).max(100).default(25),
-    drillPerPage: z.number().int().min(0).max(50).default(10),
+    drillPerPage: z.number().int().min(0).max(50).default(10),      // visuals per page drilled
+    drillDepth: z.number().int().min(1).max(5).default(2),           // hierarchy levels followed down (Year → Quarter → Month …)
+    drillPoints: z.number().int().min(1).max(5).default(1),          // data points drilled per visual (first, …, last)
+    drillThroughPerPage: z.number().int().min(0).max(20).default(3), // drill-through targets tried per page
     crossFilterPerPage: z.number().int().min(0).max(50).default(4),
     tooltipsPerPage: z.number().int().min(0).max(50).default(4),
     matrixExpandRows: z.number().int().min(1).max(20).default(3),

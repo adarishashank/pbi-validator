@@ -314,3 +314,25 @@ input[type=email] { font: inherit; border: 1px solid #cfd5de; border-radius: 8px
 .chart-tip { position: absolute; z-index: 5; pointer-events: none; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(16,24,40,.14); padding: 8px 10px; font-size: 12.5px; min-width: 190px; }
 .tip-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
 .tip-row b { margin-left: auto; }
+
+/* What changed: page heatmap (one blue ramp, darker = more change; each tile also says its level in words) */
+.chg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.chg-tile { text-align: left; border: 2px solid transparent; border-radius: 10px; padding: 10px 12px; cursor: pointer; font: inherit; min-height: 84px; }
+.chg-tile.on { border-color: var(--ink); box-shadow: 0 0 0 2px #fff inset; }
+.chg-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chg-name { font-weight: 650; overflow-wrap: anywhere; }
+.chg-lvl { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin: 2px 0 4px; }
+.chg-facts { display: flex; flex-wrap: wrap; gap: 2px 10px; opacity: .92; }
+.lvl-none { background: #eef0f3; color: #374151; }
+.lvl-low { background: #86b6ef; color: #0b2545; }
+.lvl-medium { background: #256abf; color: #fff; }
+.lvl-high { background: #0d366b; color: #fff; }
+.legend i.sw { width: 12px; height: 12px; }
+.chg-visual { padding: 7px 0; border-top: 1px solid var(--line, #e5e7eb); }
+.chg-visual:first-of-type { border-top: 0; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-align: left; }
+.linkish:hover { text-decoration: underline; }
+.crumbs { color: var(--muted); }
+table.dt-vals { margin: 6px 0 0 28px; width: calc(100% - 28px); }
+table.dt-vals td.del { background: #ffebe9; }
+table.dt-vals td.add { background: #e6ffec; }

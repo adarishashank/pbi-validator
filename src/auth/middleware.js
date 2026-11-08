@@ -103,6 +103,7 @@ const ACTIONS = [
   ['POST', /^\/suites$/, 'suite.create'], ['PUT', /^\/suites\/(\d+)$/, 'suite.update'], ['DELETE', /^\/suites\/(\d+)$/, 'suite.delete'],
   ['POST', /^\/reports$/, 'report.create'], ['PUT', /^\/reports\/(\d+)$/, 'report.update'], ['DELETE', /^\/reports\/(\d+)$/, 'report.delete'],
   ['POST', /^\/reports\/(\d+)\/discover$/, 'report.discover'],
+  ['POST', /^\/reports\/(\d+)\/model$/, 'report.upload_model'], ['DELETE', /^\/reports\/(\d+)\/model$/, 'report.remove_model'],
   ['POST', /^\/profiles$/, 'profile.create'], ['PUT', /^\/profiles\/(\d+)$/, 'profile.update'], ['DELETE', /^\/profiles\/(\d+)$/, 'profile.delete'],
   ['POST', /^\/profiles\/(\d+)\/login$/, 'profile.sign_in'], ['POST', /^\/profiles\/(\d+)\/check$/, 'profile.check'],
   ['POST', /^\/profiles\/(\d+)\/import$/, 'profile.import_session'], ['DELETE', /^\/profiles\/(\d+)\/session$/, 'profile.sign_out'],

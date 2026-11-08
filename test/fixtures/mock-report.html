@@ -55,12 +55,16 @@ const B = new URLSearchParams(location.search).get('v') === 'b';
 const PAGES = B ? ['Overview', 'Details', 'Trend Analysis'] : ['Overview', 'Details', 'Trends', 'Archive'];
 const SALES = { North: 100, South: 80, East: 60, West: B ? 45 : 40 };
 const CITIES = { North: { Leeds: B ? 61 : 60, York: 40 }, South: { Brighton: 50, Dover: 30 }, East: { Norwich: 35, Ipswich: 25 }, West: { Bath: 20, Bristol: B ? 25 : 20 } };
+// Third level: stores per city (drill Region → City → Store).
+const STORES = { Leeds: { 'Leeds Central': B ? 34 : 33, 'Leeds North': 27 }, York: { 'York Minster': 40 }, Brighton: { 'Brighton Pier': 50 }, Dover: { 'Dover Port': 30 },
+  Norwich: { 'Norwich Market': 35 }, Ipswich: { 'Ipswich Quay': 25 }, Bath: { 'Bath Spa': 20 }, Bristol: { 'Bristol Harbour': B ? 25 : 20 } };
+const ORDERS = { North: B ? 13 : 12, South: 9, East: 7, West: 5 };
 const MATRIX = [
   { name: 'Bikes', value: 500, kids: [['Road', 300], ['Mountain', 200]] },
   { name: 'Accessories', value: 120, kids: [['Helmets', B ? 75 : 70], ['Locks', 50]] },
   { name: 'Clothing', value: 80, kids: [['Jerseys', 50], ['Gloves', 30]] },
 ];
-const st = { page: 0, region: null, level: 0, drillRegion: null, expanded: new Set() };
+const st = { page: 0, region: null, level: 0, drillRegion: null, drillCity: null, expanded: new Set(), through: null };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function vc({ type, role, title, x, y, w, h, body, header = '', label }) {
@@ -78,8 +82,10 @@ function total() {
 }
 
 function chartBody() {
+  const cities = st.drillRegion ? CITIES[st.drillRegion] : Object.assign({}, ...Object.values(CITIES));
   const data = st.level === 0 ? (st.region ? { [st.region]: SALES[st.region] } : SALES)
-    : st.drillRegion ? CITIES[st.drillRegion] : Object.assign({}, ...Object.values(CITIES));
+    : st.level === 1 ? cities
+    : st.drillCity ? STORES[st.drillCity] : Object.assign({}, ...Object.keys(cities).map((c) => STORES[c]));
   const keys = Object.keys(data);
   const bw = 40, gap = 20;
   let svg = `<svg width="440" height="230"><g class="x axis" role="listbox">`;
@@ -104,17 +110,21 @@ function matrixBody() {
 
 function render() {
   const c = document.getElementById('canvas');
-  const p = PAGES[st.page];
+  const p = st.through ? 'Region detail' : PAGES[st.page];
   let html = '';
-  if (p === 'Overview') {
+  if (p === 'Region detail') {
+    // Hidden drill-through target page (not in the page list).
+    html += vc({ type: 'card', role: 'Card', title: `Region · ${st.through}`, x: 20, y: 20, w: 300, h: 110, body: `<div class="cardValue">${SALES[st.through]}</div>` });
+    html += vc({ type: 'card', role: 'Card', title: 'Orders', x: 360, y: 20, w: 300, h: 110, body: `<div class="cardValue">${ORDERS[st.through]}</div>` });
+  } else if (p === 'Overview') {
     html += vc({ type: 'card', role: 'Card', title: 'Total Sales', x: 20, y: 20, w: 300, h: 110, body: `<div class="cardValue">${total().toLocaleString('en-US')}</div>` });
     const items = ['Select all', ...Object.keys(SALES)];
     html += vc({ type: 'slicer', role: 'Slicer', title: '', x: 20, y: 150, w: 300, h: 220,
       body: `<div class="slicer-header"><span class="slicer-header-clear" aria-label="Clear selections" role="button"></span><h3 class="slicer-header-text" title="Region">Region</h3></div>
         ${items.map((it) => `<div class="slicerItemContainer" role="option" title="${it}" aria-checked="${st.region === it}">${it}</div>`).join('')}` });
-    html += vc({ type: 'clusteredColumnChart', role: 'Clustered column chart', title: st.level ? 'Sales by City' : 'Sales by Region', x: 360, y: 20, w: 460, h: 300, body: chartBody(),
+    html += vc({ type: 'clusteredColumnChart', role: 'Clustered column chart', title: ['Sales by Region', 'Sales by City', 'Sales by Store'][st.level], x: 360, y: 20, w: 460, h: 300, body: chartBody(),
       label: 'Sales by Region',
-      header: `<button aria-label="Drill up" ${st.level === 0 ? 'disabled' : ''}>↑</button><button aria-label="Expand all down one level in the hierarchy" ${st.level ? 'disabled' : ''}>⇊</button>` });
+      header: `<button aria-label="Drill up" ${st.level === 0 ? 'disabled' : ''}>↑</button><button aria-label="Expand all down one level in the hierarchy" ${st.level >= 2 ? 'disabled' : ''}>⇊</button>` });
     html += vc({ type: 'actionButton', role: 'button', title: '', label: 'Go to Details . Click here to follow', x: 860, y: 20, w: 200, h: 60, body: '<div class="actionBtn" id="goDetails">Go to Details</div>' });
     html += vc({ type: 'textbox', role: 'Text box', title: '', x: 860, y: 120, w: 300, h: 60, body: `<p>Sales overview for FY26</p>` });
   } else if (p === 'Details') {
@@ -127,7 +137,7 @@ function render() {
   }
   c.innerHTML = html;
   document.getElementById('counter').innerHTML = `<span class="innerText">${st.page + 1}</span> <span class="innerText">of</span> <span class="innerText">${PAGES.length}</span>`;
-  document.getElementById('pagelist').innerHTML = PAGES.map((n, i) => `<button class="sectionItem${i === st.page ? ' selected' : ''}" aria-label="${n}" data-i="${i}">${n}</button>`).join('');
+  document.getElementById('pagelist').innerHTML = PAGES.map((n, i) => `<button class="sectionItem${i === st.page && !st.through ? ' selected' : ''}" aria-label="${n}" data-i="${i}">${n}</button>`).join('');
 }
 
 // Simulated asynchronous query + render, like a real report.
@@ -142,7 +152,7 @@ document.addEventListener('click', (e) => {
   const t = e.target;
   document.getElementById('menu').style.display = 'none';
   if (t.closest('#counter')) { document.getElementById('pagelist').classList.toggle('open'); return; }
-  if (t.matches('.sectionItem')) { document.getElementById('pagelist').classList.remove('open'); return update(() => { st.page = +t.dataset.i; }); }
+  if (t.matches('.sectionItem')) { document.getElementById('pagelist').classList.remove('open'); return update(() => { st.page = +t.dataset.i; st.through = null; }); }
   if (t.closest('#next')) return st.page < PAGES.length - 1 && update(() => { st.page++; });
   if (t.closest('#prev')) return st.page > 0 && update(() => { st.page--; });
   if (t.closest('#goDetails')) return update(() => { st.page = B ? 2 : 1; });
@@ -150,9 +160,11 @@ document.addEventListener('click', (e) => {
   const item = t.closest('.slicerItemContainer');
   if (item) return update(() => { st.region = item.title === 'Select all' ? null : item.title; });
   if (t.matches('rect.bar') && st.level === 0) return update(() => { st.region = st.region === t.dataset.k ? null : t.dataset.k; });
-  if (t.matches('[aria-label="Drill up"]') && !t.disabled) return update(() => { st.level = 0; st.drillRegion = null; });
-  if (t.matches('[aria-label^="Expand all down"]') && !t.disabled) return update(() => { st.level = 1; st.drillRegion = null; });
-  if (t.matches('[role="menuitem"][data-act="drill"]')) return update(() => { st.level = 1; st.drillRegion = document.getElementById('menu').dataset.k; });
+  if (t.matches('[aria-label="Drill up"]') && !t.disabled) return update(() => { st.level = Math.max(0, st.level - 1); if (st.level < 2) st.drillCity = null; if (st.level < 1) st.drillRegion = null; });
+  if (t.matches('[aria-label^="Expand all down"]') && !t.disabled) return update(() => { st.level = Math.min(2, st.level + 1); st.drillRegion = null; st.drillCity = null; });
+  if (t.matches('[role="menuitem"][data-act="drill"]')) return update(() => { const k = document.getElementById('menu').dataset.k; if (st.level === 0) st.drillRegion = k; else st.drillCity = k; st.level++; });
+  if (t.matches('[role="menuitem"][data-act="dt-open"]')) { showSubmenu(); return; }
+  if (t.matches('[role="menuitem"][data-act="dt"]')) return update(() => { st.through = document.getElementById('menu').dataset.k; });
   if (t.matches('.expandCollapseButton')) return update(() => { const r = t.dataset.row; st.expanded.has(r) ? st.expanded.delete(r) : st.expanded.add(r); });
 });
 document.addEventListener('contextmenu', (e) => {
@@ -161,9 +173,14 @@ document.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const m = document.getElementById('menu');
   m.dataset.k = bar.dataset.k;
-  m.innerHTML = `${st.level === 0 ? '<div role="menuitem" data-act="drill" data-testid="pbimenu-item.Drill down">Drill down</div>' : ''}<div role="menuitem" data-testid="pbimenu-item.Show as a table">Show as a table</div>`;
+  m.innerHTML = `${st.level < 2 ? '<div role="menuitem" data-act="drill" data-testid="pbimenu-item.Drill down">Drill down</div>' : ''}${st.level === 0 ? '<div role="menuitem" data-act="dt-open">Drill through</div>' : ''}<div role="menuitem" data-testid="pbimenu-item.Show as a table">Show as a table</div>`;
   Object.assign(m.style, { display: 'block', left: `${e.clientX}px`, top: `${e.clientY}px` });
 });
+function showSubmenu() {
+  const m = document.getElementById('menu');
+  if (!m.querySelector('[data-act="dt"]')) m.insertAdjacentHTML('beforeend', '<div class="sub"><div role="menuitem" data-act="dt">Region detail</div></div>');
+}
+document.addEventListener('mouseover', (e) => { if (e.target.matches && e.target.matches('[data-act="dt-open"]')) showSubmenu(); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { document.getElementById('menu').style.display = 'none'; document.getElementById('pagelist').classList.remove('open'); }
 });

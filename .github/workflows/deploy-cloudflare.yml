@@ -8,6 +8,7 @@
 #   R2_SECRET_ACCESS_KEY
 #   APP_API_TOKEN          admin Bearer token / first-run setup token for the app
 #   NVIDIA_API_KEY         optional, enables AI analysis
+#   PBI_TENANT_ID, PBI_CLIENT_ID, PBI_CLIENT_SECRET  optional, service principal for data model comparison
 # Until the Cloudflare and R2 secrets exist, the workflow skips with a notice.
 name: Deploy to Cloudflare
 
@@ -40,6 +41,9 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       APP_API_TOKEN: ${{ secrets.APP_API_TOKEN }}
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      PBI_TENANT_ID: ${{ secrets.PBI_TENANT_ID }}
+      PBI_CLIENT_ID: ${{ secrets.PBI_CLIENT_ID }}
+      PBI_CLIENT_SECRET: ${{ secrets.PBI_CLIENT_SECRET }}
     steps:
       - name: Check configuration
         id: check
@@ -93,6 +97,7 @@ jobs:
             const s = { R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
               R2_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID, API_TOKEN: process.env.APP_API_TOKEN };
             if (process.env.NVIDIA_API_KEY) s.NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+            for (const k of ["PBI_TENANT_ID", "PBI_CLIENT_ID", "PBI_CLIENT_SECRET"]) if (process.env[k]) s[k] = process.env[k];
             require("fs").writeFileSync(process.env.RUNNER_TEMP + "/secrets.json", JSON.stringify(s));'
           npx wrangler deploy --secrets-file "$RUNNER_TEMP/secrets.json" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
           rm -f "$RUNNER_TEMP/secrets.json"
