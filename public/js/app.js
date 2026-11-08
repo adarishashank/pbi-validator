@@ -9,6 +9,7 @@ import { Profiles } from './pages/profiles.js';
 import { Login, Setup, ForcedPasswordChange } from './pages/login.js';
 import { Account, RoleBadge } from './pages/account.js';
 import { Admin } from './pages/admin.js';
+import { Trends } from './pages/trends.js';
 
 const NAV = [
   ['', '◧', 'Dashboard'],
@@ -51,6 +52,7 @@ function Shell({ parts, query }) {
   else if (top === 'runs' && parts[1]) page = html`<${RunDetail} id=${parts[1]} query=${query} />`;
   else if (top === 'runs') page = html`<${Runs} query=${query} />`;
   else if (top === 'profiles') page = html`<${Profiles} />`;
+  else if (top === 'trends' && parts[1]) page = html`<${Trends} suiteId=${parts[1]} />`;
   else if (top === 'account') page = html`<${Account} />`;
   else if (top === 'admin' && can('admin')) page = html`<${Admin} tab=${parts[1]} />`;
   else page = html`<${Dashboard} />`;
@@ -58,7 +60,7 @@ function Shell({ parts, query }) {
   return html`<div class="shell">
     <aside class="side">
       <div class="brand"><div class="brand-mark"><svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><rect x="7" y="16" width="4" height="9" fill="currentColor"/><rect x="14" y="10" width="4" height="15" fill="currentColor"/><rect x="21" y="6" width="4" height="19" fill="currentColor"/></svg></div><div>PBI Report Test<small>Report regression testing</small></div></div>
-      <nav class="nav">${nav.map(([p, ico, label]) => html`<a href=${`#/${p}`} class=${top === p ? 'active' : ''}><span class="ico">${ico}</span>${label}</a>`)}</nav>
+      <nav class="nav">${nav.map(([p, ico, label]) => html`<a href=${`#/${p}`} class=${top === p || (p === 'suites' && top === 'trends') ? 'active' : ''}><span class="ico">${ico}</span>${label}</a>`)}</nav>
       ${!can('editor') && html`<div class="side-note">👁 Read-only access. Ask an admin for the editor role to change things or start runs.</div>`}
       <div class="side-foot"><${UserMenu} user=${user} top=${top} /><${Health} /><${AiBadge} /></div>
     </aside>

@@ -1,11 +1,13 @@
 import { html, useApi, go, fmtAgo, runDuration } from '../lib.js';
 import { Badge, Progress } from '../ui.js';
 import { Topbar, SummaryChips } from './common.js';
+import { OutcomeChart } from './trends.js';
 
 export function Dashboard() {
   const stats = useApi('/stats', { poll: 5000 });
   const runs = useApi('/runs?limit=12', { poll: 3000 });
   const profiles = useApi('/profiles');
+  const trend = useApi('/trend?limit=30', { poll: 30000 });
   const s = stats.data || {};
   const active = (runs.data || []).filter((r) => ['queued', 'running'].includes(r.status));
   const needLogin = (profiles.data || []).filter((p) => p.status !== 'active');
@@ -36,6 +38,10 @@ export function Dashboard() {
           <div class="row"><b>#${r.id} ${r.suite_name}</b><${Badge} s=${r.status} /><span class="muted small">${r.phase || ''}</span><span class="spacer"></span><span class="small">${Math.round((r.progress || 0) * 100)}%</span></div>
           <div style="margin-top:6px"><${Progress} value=${r.progress} /></div></a>`)}
       </div></div>`}
+
+      ${(trend.data?.runs || []).length >= 2 && html`<div class="panel"><div class="panel-h"><div><h2>Last ${trend.data.runs.length} runs</h2>
+        <div class="small muted">Checks per run, all suites. Click a column to open the run; open a suite's Trends for more.</div></div></div>
+        <div class="panel-b"><${OutcomeChart} runs=${trend.data.runs} height=${200} /></div></div>`}
 
       <div class="panel"><div class="panel-h"><h2>Recent runs</h2><a href="#/runs" class="small">All runs →</a></div>
         ${(runs.data || []).length === 0 ? html`<div class="empty"><h3>No runs yet</h3>Create a suite and press Run.</div>` : html`

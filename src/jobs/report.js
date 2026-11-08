@@ -6,11 +6,12 @@ import { launchBrowser } from '../engine/runner.js';
 import { runDir } from './queue.js';
 import { describe } from './export.js';
 import { createLogger } from '../logger.js';
+import { config } from '../config.js';
 
 const logger = createLogger('report');
 
-export const STATUS_ORDER = ['fail', 'error', 'missing', 'diff', 'warn', 'pass', 'skipped'];
-export const STATUS_LABEL = { pass: 'Pass', diff: 'Diff', fail: 'Fail', missing: 'Missing', error: 'Error', warn: 'Warning', skipped: 'Skipped' };
+export const STATUS_ORDER = ['fail', 'error', 'missing', 'diff', 'warn', 'accepted', 'pass', 'skipped'];
+export const STATUS_LABEL = { pass: 'Pass', diff: 'Diff', fail: 'Fail', missing: 'Missing', error: 'Error', warn: 'Warning', accepted: 'Accepted', skipped: 'Skipped' };
 export const SCENARIO_LABEL = {
   report_pages: 'Pages', health: 'Health', page_render: 'Page render', structure: 'Layout', visual: 'Visual',
   button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',
@@ -19,7 +20,7 @@ const PROBLEM = new Set(['fail', 'error', 'missing', 'diff', 'warn']);
 const RUN_STATUS_LABEL = { passed: 'Passed', failed: 'Failed', diffs: 'Differences found', error: 'Error', cancelled: 'Cancelled', running: 'Running', queued: 'Queued' };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: config.timezone }) : '—');
 const fmtDur = (ms) => {
   if (ms == null) return '—';
   const s = Math.round(ms / 1000);
@@ -29,6 +30,12 @@ const runDurationMs = (run) => run.summary?.durationMs ?? (run.started_at && run
 const pct = (r) => (r == null ? '' : `${(r * 100).toFixed(r < 0.001 ? 4 : 2)}%`);
 const done = (x) => (x && x.status === 'done' && x.content ? x.content : null);
 const rank = (s) => { const i = STATUS_ORDER.indexOf(s); return i < 0 ? 99 : i; };
+
+/** "Accepted as expected (was Diff) by x: note" for exports. */
+export function acceptedText(r) {
+  const a = r.details?.accepted || {};
+  return `Accepted as expected (was ${STATUS_LABEL[a.originalStatus] || a.originalStatus || '?'})${a.by ? ` by ${a.by}` : ''}${a.note ? `: ${a.note}` : ''}`;
+}
 
 function counts(results) {
   const c = {};
@@ -63,7 +70,7 @@ export function runSheets(bundle) {
       seq: r.seq, status: STATUS_LABEL[r.status] || r.status, scenario: SCENARIO_LABEL[r.scenario] || r.scenario, page: r.page || 'Report',
       title: r.title, target: r.target || '', diff: r.diff_ratio != null ? Number((r.diff_ratio * 100).toFixed(4)) : null,
       secs: r.duration_ms != null ? Number((r.duration_ms / 1000).toFixed(1)) : null,
-      details: r.status === 'pass' ? '' : describe(r),
+      details: r.status === 'pass' ? '' : r.status === 'accepted' ? acceptedText(r) : describe(r),
       vision: v ? `${v.whatChanged}${v.likelyNoise ? ' (likely rendering noise)' : ''}` : '',
     };
   });
@@ -154,7 +161,7 @@ p { margin: 0 0 8px; }
 .s-diff, .r-diffs, .k-medium { background: #fff4e0; color: #b45309; }
 .s-fail, .r-failed, .k-high, .k-critical { background: #fdecec; color: #c81e1e; }
 .s-missing { background: #f2ecff; color: #7c3aed; } .s-error, .r-error { background: #ffe8ee; color: #be123c; }
-.s-warn { background: #fef7d7; color: #a16207; } .s-skipped, .r-cancelled { background: #f0f1f3; color: #6b7280; }
+.s-warn { background: #fef7d7; color: #a16207; } .s-accepted { background: #e0f2fe; color: #0369a1; } .s-skipped, .r-cancelled { background: #f0f1f3; color: #6b7280; }
 .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 22px; margin: 14px 0 4px; }
 .meta div { display: flex; gap: 8px; } .meta b { min-width: 86px; color: #5f6b7a; font-weight: 600; }
 .meta .full { grid-column: 1 / -1; }
@@ -183,7 +190,7 @@ ul, ol { margin: 0 0 8px; padding-left: 18px; } li { margin: 2px 0; }
 .page-break { break-before: page; }
 `;
 
-const STATUS_COLOR = { pass: '#16a34a', diff: '#d97706', fail: '#dc2626', missing: '#7c3aed', error: '#be123c', warn: '#ca8a04', skipped: '#9ca3af' };
+const STATUS_COLOR = { accepted: '#0284c7', pass: '#16a34a', diff: '#d97706', fail: '#dc2626', missing: '#7c3aed', error: '#be123c', warn: '#ca8a04', skipped: '#9ca3af' };
 const LOGO = '<svg width="22" height="22" viewBox="0 0 32 32"><rect x="7" y="16" width="4" height="9" fill="#111"/><rect x="14" y="10" width="4" height="15" fill="#111"/><rect x="21" y="6" width="4" height="19" fill="#111"/></svg>';
 const refs = (list) => (list?.length ? ` <span class="muted small">(${list.map((x) => `#${x}`).join(', ')})</span>` : '');
 
@@ -279,6 +286,15 @@ export function reportHtml(bundle, { maxIssues = 40, maxPageShots = 24, includeI
           <div class="shots">${shots.map(([cap, f]) => `<figure><figcaption>${esc(cap)}</figcaption><img src="${encodeURIComponent(f)}"></figure>`).join('')}</div></div>`;
       }
     }
+  }
+
+  // Differences accepted as expected (kept visible for transparency).
+  const accepted = results.filter((r) => r.status === 'accepted');
+  if (accepted.length) {
+    h += `<h2>Accepted as expected (${accepted.length})</h2><p class="muted">These differences were marked as intended by an editor, so they don't count as problems.</p>
+      <table><thead><tr><th style="width:28px">#</th><th>Check</th><th style="width:70px">Was</th><th style="width:34%">Accepted</th></tr></thead><tbody>
+      ${accepted.map((r) => { const a = r.details?.accepted || {}; return `<tr><td class="muted">${r.seq}</td><td><b>${esc(r.title)}</b><br><span class="muted small">${esc(SCENARIO_LABEL[r.scenario] || r.scenario)} · ${esc(r.page || 'Report')}</span></td><td><span class="pill s-${esc(a.originalStatus || '')}">${esc(STATUS_LABEL[a.originalStatus] || a.originalStatus || '')}</span></td><td>${esc(a.by || '')}${a.at ? `, ${esc(fmtDate(a.at))}` : ''}${a.note ? `<br><span class="muted">“${esc(a.note)}”</span>` : ''}<br><span class="muted small">${a.scope === 'any' ? 'Any difference in this check' : 'This exact difference'}</span></td></tr>`; }).join('')}
+      </tbody></table>`;
   }
 
   // Q&A.

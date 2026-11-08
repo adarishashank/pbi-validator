@@ -12,6 +12,9 @@ import { Container } from '@cloudflare/containers';
 
 const APP_PORT = 4400;
 const STARTUP_TIMEOUT_MS = 180_000; // restore from R2 + Node boot
+const NEXT_KEY = 'pbirt:nextScheduledRun';   // when the next scheduled suite is due (ISO)
+const WAKE_KEY = 'pbirt:lastScheduledWake';  // last time the timer woke the app
+const REFRESH_EVERY_MS = 60_000;
 
 export class PbiApp extends Container {
   defaultPort = APP_PORT;
@@ -31,6 +34,7 @@ export class PbiApp extends Container {
       TRUST_PROXY: 'true',
       ...pick([
         'API_TOKEN', 'NVIDIA_API_KEY', 'AI_TEXT_MODEL', 'AI_VISION_MODEL', 'AI_AUTO_ANALYZE', 'PUBLIC_URL',
+        'TIMEZONE', 'SCHEDULE_CATCHUP_HOURS',
         'TEMP_PASSWORD_HOURS', 'RUN_RETENTION_DAYS', 'MAX_PARALLEL_RUNS', 'LOG_LEVEL',
         'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_ENDPOINT', 'SYNC_INTERVAL_SECONDS',
       ]),
@@ -52,7 +56,51 @@ export class PbiApp extends Container {
       }
       await this.ensureStarted();
     }
-    return super.fetch(request);
+    const res = await super.fetch(request);
+    // Keep the stored "next scheduled run" fresh while people use the app
+    // (e.g. right after someone edits a suite's schedule).
+    if (!this.lastRefresh || Date.now() - this.lastRefresh > REFRESH_EVERY_MS) {
+      this.lastRefresh = Date.now();
+      this.ctx.waitUntil(this.refreshSchedule());
+    }
+    return res;
+  }
+
+  /** Asks the app when the next scheduled run is due and remembers it here. */
+  async refreshSchedule() {
+    if (!this.env.API_TOKEN) return null;
+    try {
+      const r = await this.containerFetch('http://container/api/schedules/next', { headers: { Authorization: `Bearer ${this.env.API_TOKEN}` } }, APP_PORT);
+      if (!r.ok) { console.warn(`schedule refresh: HTTP ${r.status}`); return null; }
+      const { next } = await r.json();
+      if (next) await this.ctx.storage.put(NEXT_KEY, next); else await this.ctx.storage.delete(NEXT_KEY);
+      return next || null;
+    } catch (e) {
+      console.warn(`schedule refresh failed: ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Called every minute by the Worker's cron trigger. Costs nothing unless a
+   * scheduled run is due: then it wakes the app, whose scheduler starts the
+   * due suites (and catches up any missed while it slept).
+   */
+  async checkSchedule() {
+    const next = await this.ctx.storage.get(NEXT_KEY);
+    if (!next) return 'nothing scheduled';
+    if (Date.parse(next) > Date.now()) return `next run due ${next}`;
+    const state = await this.getState();
+    if (state.status === 'healthy') { await this.refreshSchedule(); return 'awake: the app starts it'; }
+    const lastWake = await this.ctx.storage.get(WAKE_KEY);
+    if (lastWake && Date.now() - lastWake < 10 * 60_000) return 'waking (retrying in a few minutes)';
+    await this.ctx.storage.put(WAKE_KEY, Date.now());
+    console.log(`Waking the app for a scheduled run due ${next}`);
+    await this.ensureStarted();
+    this.renewActivityTimeout();
+    await new Promise((r) => setTimeout(r, 5000)); // the app's start-up tick queues due suites
+    await this.refreshSchedule();
+    return 'woke the app';
   }
 
   /** Don't go to sleep in the middle of a validation run. */
@@ -62,6 +110,7 @@ export class PbiApp extends Container {
       const h = await r.json();
       if (h.busy) { console.log('Run in progress: staying awake'); return; }
     } catch { /* not answering: fine to stop */ }
+    await this.refreshSchedule(); // remember the next scheduled run before sleeping
     await this.stop(); // SIGTERM → start.sh saves data to R2, then exits
   }
 
@@ -81,6 +130,11 @@ export default {
     headers.set('x-forwarded-host', url.host);
     const forwarded = new Request(request, { headers });
     return env.APP.getByName('main').fetch(forwarded);
+  },
+
+  /** Cron trigger (every minute): wake the app only when a scheduled run is due. */
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(env.APP.getByName('main').checkSchedule().then((r) => console.log(`schedule check: ${r}`)));
   },
 };
 

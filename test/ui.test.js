@@ -244,13 +244,48 @@ test('expired temporary passwords are refused; admin generates a new one', { tim
   await signOut();
 });
 
+test('editor accepts a difference as expected; trends and dashboard charts show the history', { timeout: 120_000 }, async () => {
+  await signIn(EDITOR.email, EDITOR.password);
+  await page.waitForSelector('h1:text-is("Dashboard")');
+  assert.equal(await page.locator('h2:has-text("Last ")').count(), 0, 'dashboard trend appears from 2 runs on');
+  await nav('/runs');
+  await page.click('tr.click');
+  await page.waitForSelector('button:has-text("Download PDF")');
+  await page.click('.res:has-text("Sales by Region")');
+  await page.click('.modal button:has-text("Accept as expected")');
+  await page.fill('.modal input[placeholder^="Why is this expected"]', 'Regional numbers restated in this release');
+  await page.click('.modal .accept-box button:has-text("Accept")');
+  await page.waitForSelector('.modal .callout.accepted:has-text("Accepted as expected")');
+  assert.match(await page.locator('.modal .callout.accepted').textContent(), /Regional numbers restated/);
+  await page.keyboard.press('Escape');
+  await page.click('.chip:has-text("Accepted")');
+  await page.waitForSelector('.res .badge:has-text("Accepted")');
+
+  // The suite editor lists it; trends show the run.
+  await nav('/suites');
+  await page.click('.suite-card a:has-text("Trends")');
+  await page.waitForSelector('h1:has-text("Trends")');
+  await page.waitForSelector('.chart svg .col');
+  assert.ok(await page.locator('.chart svg .col').count() >= 1);
+  await page.locator('.chart svg .col').first().hover();
+  await page.waitForSelector('.chart-tip:has-text("Accepted as expected")');
+  await page.check('label:has-text("Show as table") input');
+  await page.waitForSelector('table.t td:has-text("#")');
+  await nav('/suites');
+  await page.click('.suite-card button:has-text("Edit")');
+  await page.click('.modal .tabs button:has-text("Accepted differences")');
+  await page.waitForSelector('.modal td:has-text("Sales by Region")');
+  await page.keyboard.press('Escape');
+  await signOut();
+});
+
 test('audit log shows who did what; no browser errors anywhere', { timeout: 60_000 }, async () => {
   await signIn(ADMIN.email, ADMIN.password);
   await page.waitForSelector('h1:has-text("Dashboard")');
   await nav('/admin/audit');
   await page.waitForSelector('table.t');
   const text = await page.locator('table.t').textContent();
-  for (const action of ['setup.first_admin', 'user.create', 'login.success', 'login.failed', 'account.change_password', 'report.create', 'suite.create', 'suite.run', 'user.reset_password']) {
+  for (const action of ['setup.first_admin', 'user.create', 'login.success', 'login.failed', 'account.change_password', 'report.create', 'suite.create', 'suite.run', 'user.reset_password', 'result.accept']) {
     assert.ok(text.includes(action), `audit log lists ${action}`);
   }
   assert.deepEqual(pageErrors, [], 'no JavaScript errors in the browser');

@@ -10,7 +10,7 @@ import adminApi from './api/admin.js';
 import { authApi } from './api/auth.js';
 import { authenticate, auditTrail } from './auth/middleware.js';
 import { userCount } from './auth/users.js';
-import { syncSchedules, startHousekeeping } from './jobs/scheduler.js';
+import { startScheduler, startHousekeeping } from './jobs/scheduler.js';
 
 const logger = createLogger('server');
 
@@ -76,7 +76,7 @@ export function createApp() {
 export function start() {
   const n = recoverInterruptedRuns();
   if (n) logger.warn(`Marked ${n} interrupted run(s) as errored`);
-  syncSchedules();
+  startScheduler();
   startHousekeeping();
   const app = createApp();
   const server = app.listen(config.port, config.host, () => {

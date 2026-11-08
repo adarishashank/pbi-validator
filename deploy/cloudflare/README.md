@@ -67,8 +67,10 @@ existing accounts and runs, copy them once: `./deploy/cloudflare/deploy.sh --see
 ## Good to know
 - **Waking up:** after sleeping, the first visit shows "PBI Report Test is waking up"
   for up to a minute while data is restored from R2.
-- **Scheduled suites** only run while the app is awake. Start runs on demand, or
-  from CI with an API key.
+- **Scheduled suites work while the app sleeps.** A Cloudflare cron trigger checks
+  every minute (at no real cost) whether a suite is due and wakes the app only then;
+  the app starts the due runs, catching up any it missed (up to 24 h late). Cron
+  times use `TIMEZONE` in `wrangler.jsonc` (default `Asia/Kolkata`).
 - **Power BI sign-in:** the container has no screen. Sign in on your Mac, then
   **Import** the session on the *Power BI sign-ins* page (or deploy with `--seed`).
 - **Data safety:** the database is saved to R2 every 30 seconds when it changes,

@@ -1,4 +1,4 @@
-import { html, useState, useEffect, useMemo, useRef, useCallback, api, go, downloadFile, fmtDate, fmtDur, runDuration, pct, setStore, STATUS_ORDER, STATUS_LABEL, SCENARIO_LABEL } from '../lib.js';
+import { html, useState, useEffect, useMemo, useRef, useCallback, api, go, downloadFile, can, fmtDate, fmtDur, runDuration, pct, setStore, STATUS_ORDER, STATUS_LABEL, SCENARIO_LABEL } from '../lib.js';
 import { Badge, Progress, Modal, Menu, act, confirmDialog, zoom, Spinner } from '../ui.js';
 import { Topbar } from './common.js';
 import { AiInsights, AiChat, VisionPanel } from './ai.js';
@@ -35,7 +35,52 @@ function Outcome({ o, name }) {
   return html`<span><b>${name}:</b> ${o.popups?.length ? `opened ${o.popups.join(', ')}` : o.navigated ? `navigated to page “${o.page}”` : 'stayed on the same page'}</span>`;
 }
 
-function ResultView({ r, run, ai, reloadAi }) {
+const ACCEPTABLE = new Set(['diff', 'fail', 'missing', 'warn']);
+
+/** Accept-as-expected controls for one check (editors), or the accepted banner. */
+function AcceptPanel({ r, run, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [scope, setScope] = useState('exact');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const a = r.details?.accepted;
+  if (r.status === 'accepted' && a) {
+    const revoke = async () => {
+      if (!await confirmDialog({ title: 'Stop accepting this difference?', message: 'This check, and matching checks in other runs of this suite, will be flagged again.', okLabel: 'Stop accepting', danger: true })) return;
+      const res = await act(() => api(`/acceptances/${a.id}`, { method: 'DELETE' }), 'No longer accepted');
+      if (res) onChanged({ ...r, status: a.originalStatus, details: (({ accepted, ...rest }) => rest)(r.details) });
+    };
+    return html`<div class="callout accepted">✓ <div><b>Accepted as expected</b> (was <${Badge} s=${a.originalStatus} />) by ${a.by || 'an editor'} · ${fmtDate(a.at)}
+      ${a.note && html`<div class="small" style="margin-top:2px">“${a.note}”</div>`}
+      <div class="small muted" style="margin-top:2px">${a.scope === 'any' ? 'Any difference in this check is accepted.' : 'Accepted while the difference stays the same; if it changes, it is flagged again.'}</div></div>
+      ${can('editor') && html`<button class="btn sm ghost danger" style="margin-left:auto" onClick=${revoke}>Stop accepting</button>`}</div>`;
+  }
+  if (!ACCEPTABLE.has(r.status) || !can('editor') || ['queued', 'running'].includes(run.status) || !run.suite_id) return null;
+  const save = async () => {
+    setBusy(true);
+    const res = await act(() => api(`/results/${r.id}/accept`, { method: 'POST', body: { scope, note } }), 'Accepted as expected');
+    setBusy(false);
+    if (res) {
+      setOpen(false);
+      const rule = res.acceptance;
+      onChanged({ ...r, status: 'accepted', details: { ...r.details, accepted: { id: rule.id, scope: rule.scope, by: rule.created_by, at: rule.created_at, note: rule.note, originalStatus: r.status } } });
+    }
+  };
+  if (!open) return html`<div class="row"><button class="btn sm" onClick=${() => setOpen(true)}>✓ Accept as expected</button><span class="small muted">Intended change? Accept it so later runs of this suite don't flag it.</span></div>`;
+  return html`<div class="panel panel-b stack accept-box" style="gap:10px">
+    <b>Accept this difference as expected</b>
+    <label class="check"><input type="radio" name="scope" checked=${scope === 'exact'} onChange=${() => setScope('exact')} />
+      <div><b>This exact difference</b> <span class="tag">recommended</span><span>Later runs accept it while it stays the same. If the values or behaviour change again, it is flagged again.</span></div></label>
+    <label class="check"><input type="radio" name="scope" checked=${scope === 'any'} onChange=${() => setScope('any')} />
+      <div><b>Any difference in this check</b><span>For content that legitimately changes every time. This check is never flagged for this suite until you stop accepting it.</span></div></label>
+    <input type="text" maxlength="500" placeholder="Why is this expected? (e.g. New KPI added in release 4.2)" value=${note} onInput=${(e) => setNote(e.target.value)} />
+    <div class="row"><span class="spacer"></span><button class="btn" onClick=${() => setOpen(false)}>Cancel</button><button class="btn primary" disabled=${busy} onClick=${save}>${busy ? 'Accepting…' : 'Accept'}</button></div>
+  </div>`;
+}
+
+function ResultView({ r: initial, run, ai, reloadAi, onChanged }) {
+  const [r, setR] = useState(initial);
+  const changed = (next) => { setR(next); onChanged?.(next); };
   const d = r.details || {};
   const im = r.images || {};
   const names = run.snapshot?.reports || {};
@@ -51,6 +96,7 @@ function ResultView({ r, run, ai, reloadAi }) {
       ${r.diff_ratio != null && html`<span class="muted">· ${pct(r.diff_ratio)} pixels differ (${(r.diff_pixels || 0).toLocaleString()} px${d.pixel?.regions ? `, ${d.pixel.regions} region(s)` : ''})</span>`}
       ${r.duration_ms != null && html`<span class="muted">· ${fmtDur(r.duration_ms)}</span>`}
     </div>
+    <${AcceptPanel} r=${r} run=${run} onChanged=${changed} />
     ${d.note && html`<div class="callout ${r.status === 'fail' ? 'err' : 'warn'}">${d.note}</div>`}
     ${d.error && typeof d.error === 'string' && html`<div class="callout err"><pre style="margin:0;white-space:pre-wrap">${d.error}</pre></div>`}
     ${d.missingIn && html`<div class="callout err">This ${r.scenario === 'page_render' ? 'page' : 'visual'} does not exist in report ${d.missingIn}.</div>`}
@@ -87,8 +133,10 @@ function ResultView({ r, run, ai, reloadAi }) {
   </div>`;
 }
 
-function ResultModal({ list, index, run, onClose, loadAi }) {
+function ResultModal({ list: initialList, index, run, onClose, loadAi, onChanged }) {
+  const [list, setList] = useState(initialList);
   const [i, setI] = useState(index);
+  const changedOne = (next) => { setList((l) => l.map((x) => (x.id === next.id ? next : x))); onChanged?.(); };
   const [ai, setAi] = useState(null);
   const reloadAi = useCallback(async () => { try { setAi(await loadAi()); } catch { /* ignore */ } }, [loadAi]);
   useEffect(() => { reloadAi(); }, [reloadAi]);
@@ -107,7 +155,7 @@ function ResultModal({ list, index, run, onClose, loadAi }) {
     <span class="muted small" style="margin-right:auto">${i + 1} / ${list.length} · <kbd>←</kbd> <kbd>→</kbd> to navigate</span>
     <button class="btn" disabled=${i === 0} onClick=${() => setI(i - 1)}>‹ Previous</button>
     <button class="btn" disabled=${i === list.length - 1} onClick=${() => setI(i + 1)}>Next ›</button>`}>
-    <${ResultView} key=${r.id} r=${r} run=${run} ai=${ai} reloadAi=${reloadAi} /></${Modal}>`;
+    <${ResultView} key=${r.id} r=${r} run=${run} ai=${ai} reloadAi=${reloadAi} onChanged=${changedOne} /></${Modal}>`;
 }
 
 // ---------------------------------------------------------------- export
@@ -192,7 +240,7 @@ export function RunDetail({ id }) {
   if (!run) return html`<div class="content"><${Spinner} /></div>`;
   const snap = run.snapshot || {};
   const reps = snap.reports || {};
-  const openResult = (r, list = filtered) => setStore({ modal: html`<${ResultModal} list=${list} index=${Math.max(0, list.indexOf(r))} run=${run} loadAi=${loadAi} onClose=${() => { setStore({ modal: null }); reloadAi(); }} />` });
+  const openResult = (r, list = filtered) => setStore({ modal: html`<${ResultModal} list=${list} index=${Math.max(0, list.indexOf(r))} run=${run} loadAi=${loadAi} onChanged=${loadAll} onClose=${() => { setStore({ modal: null }); reloadAi(); }} />` });
   const openRef = (seq) => { const r = results.find((x) => x.seq === seq); if (r) openResult(r, results); };
   const cancel = async () => { if (await confirmDialog({ title: 'Cancel run?', message: 'Stop this run? Results captured so far are kept.', okLabel: 'Cancel run', danger: true })) { await act(() => api(`/runs/${id}/cancel`, { method: 'POST' }), 'Cancelling…'); } };
   const rerun = async () => { const r = await act(() => api(`/runs/${id}/rerun`, { method: 'POST' }), 'Run queued'); if (r) go(`/runs/${r.runId}`); };

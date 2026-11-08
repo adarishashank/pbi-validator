@@ -26,6 +26,11 @@ export const config = {
   host: process.env.HOST || '127.0.0.1',
   // 'loopback' (default), a list like 'loopback, uniquelocal', a hop count, or
   // 'true' when only a trusted proxy can reach the app (Cloudflare Worker).
+  // Time zone for schedules (cron times) and dates in exports, e.g. Asia/Kolkata.
+  timezone: process.env.TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+  // A scheduled run missed while the app was asleep/offline is caught up on the
+  // next start, unless it is older than this many hours (then it is skipped).
+  scheduleCatchUpHours: Number(process.env.SCHEDULE_CATCHUP_HOURS || 24),
   trustProxy: (() => {
     const v = (process.env.TRUST_PROXY || 'loopback').trim();
     if (v === 'true') return true;

@@ -29,7 +29,7 @@ const MAX_FILES = 18_000; // Cloudflare Pages allows 20,000 files per deployment
 const RUN_STATUS_LABEL = { passed: 'Passed', failed: 'Failed', diffs: 'Differences found', error: 'Error', cancelled: 'Cancelled' };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC' : '—');
+const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: config.timezone }) : '—');
 
 // ------------------------------------------------------------------ state
 const DEFAULTS = { project: 'pbireporttest', url: '', passwordSet: false, lastDeployAt: null, lastError: null };
@@ -191,7 +191,7 @@ input{width:100%;max-width:420px;padding:10px 12px;border:1px solid #cfd5de;bord
 .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em}
 .s-pass,.r-passed,.k-none,.k-low{background:#e9f7ee;color:#15803d}.s-diff,.r-diffs,.k-medium{background:#fff4e0;color:#b45309}
 .s-fail,.r-failed,.k-high,.k-critical{background:#fdecec;color:#c81e1e}.s-missing{background:#f2ecff;color:#7c3aed}
-.s-error,.r-error{background:#ffe8ee;color:#be123c}.s-warn{background:#fef7d7;color:#a16207}.s-skipped,.r-cancelled{background:#f0f1f3;color:#6b7280}
+.s-error,.r-error{background:#ffe8ee;color:#be123c}.s-warn{background:#fef7d7;color:#a16207}.s-accepted{background:#e0f2fe;color:#0369a1}.s-skipped,.r-cancelled{background:#f0f1f3;color:#6b7280}
 .empty{text-align:center;color:#6b7686;padding:60px 0}footer{color:#94a3b8;font-size:12px;text-align:center;margin-top:30px}
 </style></head><body>
 <header><div class="brand"><div class="mark"><svg width="24" height="24" viewBox="0 0 32 32"><rect x="7" y="16" width="4" height="9" fill="#111"/><rect x="14" y="10" width="4" height="15" fill="#111"/><rect x="21" y="6" width="4" height="19" fill="#111"/></svg></div>

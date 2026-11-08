@@ -155,6 +155,27 @@ CREATE TABLE IF NOT EXISTS settings (
 const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
 if (!hasColumn('runs', 'triggered_by')) db.exec('ALTER TABLE runs ADD COLUMN triggered_by TEXT');
 // When a one-time (temporary) password stops working; NULL once the user has chosen their own.
+// When each scheduled suite is next due (persisted so a sleeping/restarted app can catch up).
+if (!hasColumn('suites', 'next_scheduled_at')) db.exec('ALTER TABLE suites ADD COLUMN next_scheduled_at TEXT');
+// Differences accepted as expected: matching checks in later runs become "accepted".
+db.exec(`CREATE TABLE IF NOT EXISTS acceptances (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  suite_id INTEGER NOT NULL REFERENCES suites(id) ON DELETE CASCADE,
+  match_key TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'exact',
+  fingerprint TEXT NOT NULL DEFAULT '',
+  original_status TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  page TEXT NOT NULL DEFAULT '',
+  scenario TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  from_run_id INTEGER,
+  last_matched_at TEXT,
+  match_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_acceptances_suite ON acceptances(suite_id);`);
 // When a run was published to the Cloudflare Pages results site (NULL = not published).
 if (!hasColumn('runs', 'published_at')) db.exec('ALTER TABLE runs ADD COLUMN published_at TEXT');
 if (!hasColumn('users', 'temp_password_expires_at')) db.exec('ALTER TABLE users ADD COLUMN temp_password_expires_at TEXT');

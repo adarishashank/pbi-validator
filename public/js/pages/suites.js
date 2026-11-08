@@ -1,4 +1,4 @@
-import { html, useApi, useState, setStore, fmtAgo, fmtDate, go, api } from '../lib.js';
+import { html, useApi, useState, setStore, fmtAgo, fmtDate, go, api, can } from '../lib.js';
 import { Badge, Modal, Field, Check, act, confirmDialog, Empty } from '../ui.js';
 import { Topbar, SummaryChips } from './common.js';
 
@@ -20,7 +20,28 @@ const LIMITS = [
 
 const lines = (s) => s.split('\n').map((x) => x.trim()).filter(Boolean);
 
-function SuiteEditor({ suite, reports, defaults, onDone }) {
+/** Differences accepted as expected for a suite, with the option to stop accepting. */
+function AcceptedList({ suiteId }) {
+  const { data, reload } = useApi(`/suites/${suiteId}/acceptances`);
+  const remove = async (a) => {
+    if (!(await confirmDialog({ title: 'Stop accepting?', message: `"${a.title}" will be flagged again in this suite's runs.`, okLabel: 'Stop accepting', danger: true }))) return;
+    await act(() => api(`/acceptances/${a.id}`, { method: 'DELETE' }), 'No longer accepted');
+    reload();
+  };
+  if (!data) return null;
+  if (!data.length) return html`<${Empty} title="Nothing accepted yet">Open a run of this suite, click a difference you expect (for example a new KPI), and choose <b>Accept as expected</b>. Later runs then won't flag it.</${Empty}>`;
+  return html`<div class="stack"><div class="small muted">Checks matching these are shown as <span class="badge b-accepted">Accepted</span> instead of problems. ${data.length} accepted.</div>
+    <table class="t"><thead><tr><th>Check</th><th>Was</th><th>Applies to</th><th>Accepted</th><th>Matched</th><th></th></tr></thead><tbody>
+    ${data.map((a) => html`<tr><td><b>${a.title}</b><div class="small muted">${a.page || 'Report'}</div>${a.note && html`<div class="small">“${a.note}”</div>`}</td>
+      <td><${Badge} s=${a.original_status} /></td>
+      <td class="small">${a.scope === 'any' ? 'Any difference' : 'This exact difference'}</td>
+      <td class="small muted">${a.created_by || '—'}<div>${fmtDate(a.created_at)}</div></td>
+      <td class="small muted">${a.match_count}×${a.last_matched_at ? html`<div>last ${fmtAgo(a.last_matched_at)}</div>` : ''}</td>
+      <td style="text-align:right">${can('editor') && html`<button class="btn sm ghost danger" onClick=${() => remove(a)}>Stop accepting</button>`}</td></tr>`)}
+    </tbody></table></div>`;
+}
+
+function SuiteEditor({ suite, reports, defaults, timezone, onDone }) {
   const base = structuredClone(suite?.config || defaults);
   const [f, setF] = useState({
     name: suite?.name || '', description: suite?.description || '', mode: suite?.mode || 'compare',
@@ -57,7 +78,8 @@ function SuiteEditor({ suite, reports, defaults, onDone }) {
   const T = (id, label) => html`<button class=${tab === id ? 'on' : ''} onClick=${() => setTab(id)}>${label}</button>`;
   return html`<${Modal} size="wide" title=${suite?.id ? `Edit suite · ${suite.name}` : 'New test suite'} onClose=${() => setStore({ modal: null })}
     footer=${html`<button class="btn" onClick=${() => setStore({ modal: null })}>Cancel</button><button class="btn primary" onClick=${save}>Save suite</button>`}>
-    <div class="tabs">${T('basics', 'Basics')}${T('scenarios', 'Scenarios')}${T('tolerances', 'Tolerances & ignores')}${T('advanced', 'Advanced')}</div>
+    <div class="tabs">${T('basics', 'Basics')}${T('scenarios', 'Scenarios')}${T('tolerances', 'Tolerances & ignores')}${T('advanced', 'Advanced')}${suite?.id && T('accepted', 'Accepted differences')}</div>
+    ${tab === 'accepted' && suite?.id && html`<${AcceptedList} suiteId=${suite.id} />`}
 
     ${tab === 'basics' && html`<div class="form-grid">
       <${Field} label="Suite name"><input type="text" value=${f.name} onInput=${set('name')} placeholder="Sales report · DEV vs PROD" /></${Field}>
@@ -70,7 +92,7 @@ function SuiteEditor({ suite, reports, defaults, onDone }) {
         ${reports.map((r) => html`<option value=${r.id}>${r.name}${r.environment ? ` · ${r.environment}` : ''}</option>`)}</select></${Field}>`
         : html`<div class="callout info small">Single mode checks rendering health, visual errors and that every interaction works — with screenshots of each state.</div>`}
       <${Field} label="Description" full><input type="text" value=${f.description} onInput=${set('description')} placeholder="What is this suite protecting?" /></${Field}>
-      <${Field} label="Schedule (cron, optional)" hint="e.g. 0 6 * * 1-5 = weekdays 06:00 (server time). Leave empty for manual/CI runs."><input type="text" value=${f.schedule} onInput=${set('schedule')} placeholder="0 6 * * 1-5" /></${Field}>
+      <${Field} label="Schedule (cron, optional)" hint=${`e.g. 0 6 * * 1-5 = weekdays 06:00, 30 7 * * * = daily 07:30. Times are ${timezone || 'server time'}. Leave empty for on-demand runs.`}><input type="text" value=${f.schedule} onInput=${set('schedule')} placeholder="0 6 * * 1-5" /></${Field}>
       <${Field} label="Pages to include" hint="One per line; exact name or /regex/. Empty = all pages."><textarea value=${txt.include} onInput=${(e) => setTxt({ ...txt, include: e.target.value })}></textarea></${Field}>
       <${Field} label="Pages to exclude" full hint="One per line; exact name or /regex/ (e.g. /^Tooltip/ for tooltip pages)."><textarea value=${txt.exclude} onInput=${(e) => setTxt({ ...txt, exclude: e.target.value })} style="min-height:60px"></textarea></${Field}>
     </div>`}
@@ -130,7 +152,7 @@ export function Suites() {
   const repName = (id) => (reports.data || []).find((r) => r.id === id);
   const open = (s) => {
     if (!(reports.data || []).length) return act(() => { throw new Error('Add report links first'); });
-    setStore({ modal: html`<${SuiteEditor} suite=${s} reports=${reports.data} defaults=${meta.data?.defaults} onDone=${reload} />` });
+    setStore({ modal: html`<${SuiteEditor} suite=${s} reports=${reports.data} defaults=${meta.data?.defaults} timezone=${meta.data?.timezone} onDone=${reload} />` });
   };
   const run = async (s) => { const r = await act(() => api(`/suites/${s.id}/run`, { method: 'POST' }), 'Run queued'); if (r) go(`/runs/${r.runId}`); };
   const del = async (s) => {
@@ -162,6 +184,7 @@ export function Suites() {
           <div class="row" style="margin-top:4px">
             <button class="btn ed primary sm" onClick=${() => run(s)}>▶ Run now</button>
             <a class="btn sm" href=${`#/runs?suite=${s.id}`}>History</a>
+            <a class="btn sm" href=${`#/trends/${s.id}`}>Trends</a>
             <button class="btn ed sm ghost" onClick=${() => open(s)}>Edit</button>
             <button class="btn ed sm ghost" onClick=${() => dup(s)}>Duplicate</button>
             <span class="spacer"></span>

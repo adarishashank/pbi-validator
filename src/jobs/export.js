@@ -19,6 +19,7 @@ const xmlEsc = (s) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;',
 /** One-line, human-readable reason for a non-passing result. */
 export function describe(r) {
   const d = r.details || {};
+  if (r.status === 'accepted' && d.accepted) return `accepted as expected (was ${d.accepted.originalStatus})${d.accepted.note ? `: ${d.accepted.note}` : ''}`;
   const parts = [];
   if (d.note) parts.push(d.note);
   if (typeof d.error === 'string') parts.push(d.error.split('\n')[0]);
@@ -92,7 +93,7 @@ export function renderHtml(data, { topBar = '' } = {}) {
 header{background:#111827;color:#fff;padding:20px 28px}header h1{margin:0 0 4px;font-size:20px}header .sub{color:#cbd5e1}
 main{padding:20px 28px;max-width:1500px;margin:auto}.chips{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
 .chip{padding:4px 10px;border-radius:999px;background:#fff;border:1px solid var(--line);font-weight:600}
-.s-pass{color:var(--pass)}.s-diff{color:var(--diff)}.s-fail{color:var(--fail)}.s-missing{color:var(--miss)}.s-error{color:var(--err)}.s-skipped{color:var(--skip)}.s-warn{color:var(--warn)}
+.s-pass{color:var(--pass)}.s-diff{color:var(--diff)}.s-fail{color:var(--fail)}.s-missing{color:var(--miss)}.s-error{color:var(--err)}.s-skipped{color:var(--skip)}.s-accepted{color:#0369a1}.s-warn{color:var(--warn)}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}select,input{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit}
 .page{margin:22px 0 8px;font-size:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:12px 14px}
 .card h3{margin:0;font-size:14px;display:flex;gap:10px;align-items:center}.badge{font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:999px;border:1px solid currentColor}

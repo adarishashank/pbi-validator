@@ -130,3 +130,30 @@ test('exports: PDF report and Excel workbook are built from a real run', { timeo
   assert.equal(xlsx.subarray(0, 2).toString(), 'PK', 'xlsx is a zip');
   assert.ok(xlsx.includes(Buffer.from('xl/worksheets/sheet2.xml')));
 });
+
+test('accepted differences are recognised in the next real run of the suite', { timeout: 300000 }, async () => {
+  assert.ok(regressionRunId, 'needs the regression run');
+  const { acceptResult } = await import('../src/jobs/acceptances.js');
+  const rows = db.q.all('SELECT * FROM results WHERE run_id = ? ORDER BY seq', regressionRunId);
+  const pick = (scenario, re) => rows.find((r) => r.scenario === scenario && re.test(r.title));
+  const button = pick('button', /Go to Details/);
+  const card = pick('visual', /Total Sales/);
+  const archive = pick('page_render', /Archive/);
+  for (const r of [button, card, archive]) acceptResult(r.id, { scope: 'exact', note: 'intended', user: 'e2e' });
+  const suiteId = db.q.get('SELECT suite_id FROM runs WHERE id = ?', regressionRunId).suite_id;
+
+  const runId = queue.runQueue.enqueue(suiteId, 'test');
+  const status = await queue.runQueue.waitFor(runId);
+  const again = db.q.all('SELECT * FROM results WHERE run_id = ? ORDER BY seq', runId);
+  const find2 = (scenario, re) => again.find((r) => r.scenario === scenario && re.test(r.title));
+  for (const [scenario, re] of [['button', /Go to Details/], ['visual', /Total Sales/], ['page_render', /Archive/]]) {
+    const r = find2(scenario, re);
+    assert.equal(r.status, 'accepted', `${r.title} accepted in the new run (${JSON.stringify(r.details).slice(0, 200)})`);
+    assert.equal(r.details.accepted.note, 'intended');
+  }
+  // Differences that were not accepted are still reported.
+  assert.equal(find2('visual', /Sales by Region/).status, 'diff');
+  assert.equal(status, 'failed', 'other missing visuals still fail the run');
+  const run = db.q.get('SELECT summary FROM runs WHERE id = ?', runId);
+  assert.equal(run.summary.byStatus.accepted, 3);
+});

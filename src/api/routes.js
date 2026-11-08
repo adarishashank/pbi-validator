@@ -4,12 +4,13 @@ import { z } from 'zod';
 import { q, insert, update, nowIso } from '../db.js';
 import { config } from '../config.js';
 import { runQueue, bus, deleteRun } from '../jobs/queue.js';
-import { syncSchedules, validateCron, nextRunOf } from '../jobs/scheduler.js';
+import { syncSchedules, validateCron, nextRunOf, nextScheduledAt } from '../jobs/scheduler.js';
 import { discoverReport } from '../jobs/discovery.js';
 import { loadRunBundle, junitXml, streamHtmlZip } from '../jobs/export.js';
 import { runSheets, runsListSheets, renderRunPdf } from '../jobs/report.js';
 import { xlsxBuffer } from '../jobs/xlsx.js';
 import { pagesStatus, publishRun, unpublishRun } from '../jobs/pages.js';
+import { acceptResult, revokeAcceptance } from '../jobs/acceptances.js';
 import { SuiteConfigSchema, DEFAULT_SUITE_CONFIG } from '../engine/options.js';
 import { DEFAULT_SELECTORS } from '../engine/selectors.js';
 import { aiStatus } from '../ai/client.js';
@@ -49,8 +50,11 @@ router.get('/meta', (req, res) => res.json({
   headless: config.headless,
   maxParallelRuns: config.maxParallelRuns,
   retentionDays: config.runRetentionDays,
+  timezone: config.timezone,
   ai: aiStatus(),
 }));
+// When the next scheduled run is due (read by the Cloudflare wake-up timer).
+router.get('/schedules/next', (req, res) => res.json({ next: nextScheduledAt(), timezone: config.timezone }));
 
 // --------------------------------------------------------------------- AI
 router.get('/ai/status', (req, res) => res.json(aiStatus()));
@@ -215,16 +219,16 @@ router.post('/suites', wrap((req, res) => {
   const d = normaliseSuite(req.body);
   if (q.get('SELECT id FROM suites WHERE name = ?', d.name)) throw httpError(409, 'A suite with that name exists');
   const id = insert('suites', d);
-  syncSchedules();
+  syncSchedules({ resetSuiteId: id });
   res.status(201).json(suiteOut(mustGet('suites', id)));
 }));
 router.put('/suites/:id', wrap((req, res) => {
-  const id = idParam(req); mustGet('suites', id);
+  const id = idParam(req); const before = mustGet('suites', id);
   const d = normaliseSuite(req.body);
   const clash = q.get('SELECT id FROM suites WHERE name = ? AND id != ?', d.name, id);
   if (clash) throw httpError(409, 'A suite with that name exists');
   update('suites', id, { ...d, updated_at: nowIso() });
-  syncSchedules();
+  syncSchedules({ resetSuiteId: before.schedule !== d.schedule ? id : null });
   res.json(suiteOut(mustGet('suites', id)));
 }));
 router.delete('/suites/:id', wrap((req, res) => {
@@ -238,6 +242,39 @@ router.post('/suites/:id/run', wrap((req, res) => {
   const runId = runQueue.enqueue(id, 'manual', req.user?.email || null);
   res.status(202).json({ runId });
 }));
+
+// ------------------------------------------- accepted differences & trends
+const AcceptSchema = z.object({ scope: z.enum(['exact', 'any']).default('exact'), note: z.string().trim().max(500).optional().default('') });
+router.post('/results/:id/accept', wrap((req, res) => {
+  const d = parse(AcceptSchema, req.body);
+  const out = acceptResult(idParam(req), { ...d, user: req.user?.email || null });
+  res.locals.auditTarget = `${out.acceptance.title} (suite #${out.acceptance.suite_id})`;
+  res.locals.auditDetail = { scope: d.scope };
+  res.status(201).json(out);
+}));
+router.get('/suites/:id/acceptances', wrap((req, res) => {
+  const id = idParam(req); mustGet('suites', id);
+  res.json(q.all('SELECT * FROM acceptances WHERE suite_id = ? ORDER BY id DESC', id));
+}));
+router.delete('/acceptances/:id', wrap((req, res) => {
+  const out = revokeAcceptance(idParam(req));
+  res.locals.auditTarget = `${out.rule.title} (suite #${out.rule.suite_id})`;
+  res.json({ runsUpdated: out.runsUpdated });
+}));
+
+/** Per-run outcome counts, oldest first, for trend charts. */
+const trendOf = (where, params, limit) => q.all(`SELECT id, suite_id, suite_name, status, trigger, started_at, finished_at, summary FROM runs
+    WHERE status IN ('passed','diffs','failed','error') ${where} ORDER BY id DESC LIMIT ?`, ...params, limit)
+  .reverse()
+  .map((r) => ({
+    id: r.id, suiteId: r.suite_id, suite: r.suite_name, status: r.status, trigger: r.trigger,
+    startedAt: r.started_at, durationMs: r.summary?.durationMs ?? null, total: r.summary?.total ?? 0, byStatus: r.summary?.byStatus || {},
+  }));
+router.get('/suites/:id/trend', wrap((req, res) => {
+  const id = idParam(req); const s = mustGet('suites', id);
+  res.json({ suite: { id: s.id, name: s.name }, runs: trendOf('AND suite_id = ?', [id], Math.min(Number(req.query.limit) || 30, 200)) });
+}));
+router.get('/trend', (req, res) => res.json({ runs: trendOf('', [], Math.min(Number(req.query.limit) || 30, 200)) }));
 
 // ------------------------------------------------------------------- runs
 const listRuns = (query, max = 500) => {

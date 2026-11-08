@@ -22,6 +22,7 @@ export function Runs({ query }) {
         <option value="">All suites</option>${(suites.data || []).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select>
       <select style="width:auto;max-width:170px" value=${status} onChange=${(e) => setQ('status', e.target.value)}>
         <option value="">Any result</option>${RESULTS.map(([v, l]) => html`<option value=${v}>${l}</option>`)}</select>
+      ${suite && html`<a class="btn" href=${`#/trends/${suite}`}>Trends</a>`}
       <button class="btn" disabled=${!list.length} title="Download this list as an Excel workbook"
         onClick=${() => downloadFile(`/runs/export.xlsx?${new URLSearchParams({ ...(suite && { suite }), ...(status && { status }) })}`, { busy: 'Building the Excel workbook…' })}>⇩ Export to Excel</button>
     </${Topbar}>

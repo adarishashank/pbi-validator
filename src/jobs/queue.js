@@ -10,6 +10,7 @@ import { profileStatePath, writeStateFile } from '../auth/profiles.js';
 import { redact } from '../engine/pbi.js';
 import { analyzeRun, setAiEmitter } from '../ai/analysis.js';
 import { aiStatus } from '../ai/client.js';
+import { loadAcceptances, applyAcceptances } from './acceptances.js';
 
 const logger = createLogger('queue');
 export const bus = new EventEmitter();
@@ -102,6 +103,7 @@ class RunQueue {
 
     let seq = 0;
     const counts = { total: 0, byStatus: {}, byScenario: {} };
+    const acceptances = loadAcceptances(run.suite_id);
     let lastProgressWrite = 0;
 
     const log = (level, message) => {
@@ -133,13 +135,14 @@ class RunQueue {
         title: r.title || r.scenario, status: r.status, diff_ratio: r.diffRatio ?? null, diff_pixels: r.diffPixels ?? null,
         images, details: r.details || {}, duration_ms: r.durationMs ?? null,
       };
+      applyAcceptances(acceptances, row); // known, accepted differences → status "accepted"
       const rid = insert('results', row);
       counts.total++;
-      counts.byStatus[r.status] = (counts.byStatus[r.status] || 0) + 1;
+      counts.byStatus[row.status] = (counts.byStatus[row.status] || 0) + 1;
       counts.byScenario[r.scenario] ??= {};
-      counts.byScenario[r.scenario][r.status] = (counts.byScenario[r.scenario][r.status] || 0) + 1;
-      const level = FAIL_STATUSES.has(r.status) ? 'warn' : r.status === 'diff' ? 'warn' : 'info';
-      log(level, `${statusIcon(r.status)} [${r.scenario}] ${row.title}${r.diffRatio ? ` (${(r.diffRatio * 100).toFixed(2)}% px)` : ''}`);
+      counts.byScenario[r.scenario][row.status] = (counts.byScenario[r.scenario][row.status] || 0) + 1;
+      const level = FAIL_STATUSES.has(row.status) ? 'warn' : row.status === 'diff' ? 'warn' : 'info';
+      log(level, `${statusIcon(row.status)} [${r.scenario}] ${row.title}${r.diffRatio ? ` (${(r.diffRatio * 100).toFixed(2)}% px)` : ''}${row.status === 'accepted' ? ` (accepted ${row.details.accepted.originalStatus})` : ''}`);
       bus.emit(`run:${runId}`, { type: 'result', result: { id: rid, ...row, details: undefined } });
     };
     const saveState = async (side, state) => {
@@ -202,7 +205,7 @@ class RunQueue {
 }
 
 function statusIcon(s) {
-  return { pass: '✔', diff: '≠', fail: '✖', missing: '∅', error: '⚠', warn: '!', skipped: '–' }[s] || '•';
+  return { pass: '✔', diff: '≠', fail: '✖', missing: '∅', error: '⚠', warn: '!', skipped: '–', accepted: '✓' }[s] || '•';
 }
 
 export const runQueue = new RunQueue();

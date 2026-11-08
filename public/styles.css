@@ -108,6 +108,7 @@ table.t tr.click:hover td { background: #f8fafc; }
 .b-warn, .b-signing_in { color: var(--warn); background: var(--warn-bg); }
 .b-skipped, .b-cancelled, .b-not_signed_in, .b-queued { color: var(--skipped); background: var(--skipped-bg); }
 .b-running { color: var(--running); background: var(--running-bg); }
+.b-accepted { color: #0369a1; background: #e0f2fe; }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 6px; background: #eef1f5; color: var(--ink-2); font-size: 12px; font-weight: 600; }
 .chip { display: inline-flex; gap: 6px; align-items: center; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-weight: 600; font-size: 12.5px; cursor: pointer; }
 .chip.on { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -122,6 +123,8 @@ table.t tr.click:hover td { background: #f8fafc; }
 .callout { padding: 12px 14px; border-radius: 8px; border: 1px solid; display: flex; gap: 10px; align-items: flex-start; }
 .callout.warn { background: var(--warn-bg); border-color: #f3dd8a; color: #6b4a00; }
 .callout.info { background: var(--accent-soft); border-color: #c9d7fb; color: #1e3a8a; }
+.callout.accepted { background: #e0f2fe; border-color: #bae6fd; color: #0c4a6e; align-items: flex-start; }
+.accept-box { border-color: #bae6fd; background: #f8fcff; }
 .callout.ok { background: var(--pass-bg); border-color: #b7e4c7; color: #14532d; }
 .callout.err { background: var(--fail-bg); border-color: #f5c2c2; color: #7f1d1d; }
 .empty { text-align: center; padding: 48px 20px; color: var(--muted); }
@@ -295,3 +298,19 @@ details.guide summary { cursor: pointer; }
 details.guide ol { margin: 10px 0 6px; padding-left: 20px; display: grid; gap: 8px; }
 .btn-group .btn.on { background: var(--accent-soft); color: var(--accent-2); border-color: #bfd0fb; z-index: 1; }
 input[type=email] { font: inherit; border: 1px solid #cfd5de; border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--ink); width: 100%; min-width: 0; }
+
+/* ---------- charts ---------- */
+.chart { position: relative; }
+.chart svg { display: block; overflow: visible; }
+.chart .grid { stroke: #e1e0d9; stroke-width: 1; }
+.chart .axis { stroke: #c3c2b7; stroke-width: 1; }
+.chart .tick { font-size: 11px; fill: var(--muted); font-family: inherit; }
+.chart .crosshair { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .col { cursor: pointer; }
+.chart .col:hover path, .chart .col:hover rect[fill]:not([fill="transparent"]) { opacity: .85; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i, .tip-row i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.chart-tip { position: absolute; z-index: 5; pointer-events: none; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(16,24,40,.14); padding: 8px 10px; font-size: 12.5px; min-width: 190px; }
+.tip-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.tip-row b { margin-left: auto; }

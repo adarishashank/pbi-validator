@@ -147,8 +147,8 @@ export function runDuration(r) {
 }
 export const pct = (r) => (r == null ? '' : r === 0 ? '0%' : r < 0.0001 ? '<0.01%' : `${(r * 100).toFixed(r < 0.01 ? 2 : 1)}%`);
 
-export const STATUS_ORDER = ['fail', 'error', 'missing', 'diff', 'warn', 'pass', 'skipped'];
-export const STATUS_LABEL = { pass: 'Pass', diff: 'Diff', fail: 'Fail', missing: 'Missing', error: 'Error', warn: 'Warn', skipped: 'Skipped' };
+export const STATUS_ORDER = ['fail', 'error', 'missing', 'diff', 'warn', 'accepted', 'pass', 'skipped'];
+export const STATUS_LABEL = { pass: 'Pass', diff: 'Diff', fail: 'Fail', missing: 'Missing', error: 'Error', warn: 'Warn', accepted: 'Accepted', skipped: 'Skipped' };
 export const SCENARIO_LABEL = {
   report_pages: 'Pages', health: 'Health', page_render: 'Page render', structure: 'Layout', visual: 'Visual',
   button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',

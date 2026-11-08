@@ -42,6 +42,12 @@ Run status: **passed**, **diffs** (only visual/data differences), **failed** (fa
 
 CLI: `npm run cli -- add-user <email> --role viewer|editor|admin`, `create-admin <email>`, `reset-password <email>` (each prints an automatically generated temporary password and its expiry), `users`. The `API_TOKEN` still works as an admin Bearer token for scripts.
 
+## Accepting expected differences, schedules and trends
+
+* **Accept as expected**: open a check with a difference and click *Accept as expected*. Choose *this exact difference* (later runs accept it while the changed values/behaviour stay the same, and flag it again if they change) or *any difference in this check*. Accepted checks show as **Accepted**, don't count as problems, are listed with who/why in the PDF and Excel exports, and can be managed in the suite editor's *Accepted differences* tab.
+* **Schedules**: cron expressions per suite, in the `TIMEZONE` you configure (default: the server's). Due times are stored, so a run missed while the app was asleep or restarting runs once when it's back (within `SCHEDULE_CATCHUP_HOURS`). On Cloudflare a cron trigger wakes the app only when something is due.
+* **Trends**: each suite has a *Trends* page (checks per run: passed / accepted / needs attention, and run time, with a table view); the dashboard shows the last 30 runs.
+
 ## AI analysis (NVIDIA open models)
 
 With a free [NVIDIA API key](https://build.nvidia.com) in `.env` (`NVIDIA_API_KEY=nvapi-…`), every finished run is analysed automatically:

@@ -7,6 +7,8 @@
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "observability": { "enabled": true },
+  // Every minute: wake the app only when a scheduled suite is due (see checkSchedule).
+  "triggers": { "crons": ["* * * * *"] },
 
   "containers": [
     {
@@ -28,6 +30,8 @@
   "vars": {
     "R2_BUCKET": "pbireporttest-data",
     "SLEEP_AFTER": "30m",
+    // Schedules (cron times) and dates in exports use this time zone.
+    "TIMEZONE": "Asia/Kolkata",
     "SYNC_INTERVAL_SECONDS": "30",
     "RUN_RETENTION_DAYS": "30",
     "MAX_PARALLEL_RUNS": "1",
