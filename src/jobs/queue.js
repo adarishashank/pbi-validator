@@ -19,6 +19,14 @@ setAiEmitter((runId, payload) => bus.emit(`run:${runId}`, payload));
 
 export const runDir = (runId) => path.join(config.runsDir, String(runId));
 
+/** One readable sentence for the run banner; the full text stays in the log. */
+export function shortError(msg) {
+  const first = String(msg || '').split(/\n|Call log:/)[0].trim();
+  const m = /^(locator\.\w+|page\.\w+|frame\.\w+): (Timeout \d+ms exceeded)/.exec(first);
+  if (m) return `A step in the report timed out (${m[2].replace('Timeout ', '').replace(' exceeded', '')}): something on the page, such as an open dropdown or popup, blocked a click. See the Log tab for details.`;
+  return first.length > 300 ? `${first.slice(0, 297)}…` : first;
+}
+
 const FAIL_STATUSES = new Set(['fail', 'missing', 'error']);
 
 /** Snapshot of everything a run needs, so later edits don't affect history. */
@@ -169,7 +177,7 @@ class RunQueue {
       log('debug', `A: ${redact(snap.reports.A.url)}${snap.reports.B ? ` | B: ${redact(snap.reports.B.url)}` : ''}`);
       engineSummary = await executeRun({
         mode: snap.suite.mode, cfg: snap.config, signal, reports, log, progress, record, saveState,
-        headless: config.headless,
+        headless: config.headless, startedAt: Date.now(), parallelPages: config.parallelPages,
       });
       const s = counts.byStatus;
       if ((s.fail || 0) + (s.missing || 0) + (s.error || 0) > 0) status = 'failed';
@@ -179,7 +187,7 @@ class RunQueue {
       if (e instanceof CancelledError || signal.aborted) {
         status = 'cancelled'; error = 'Cancelled by user';
       } else {
-        status = 'error'; error = e.message;
+        status = 'error'; error = shortError(e.message);
         log('error', `Run aborted: ${e.message}`);
         if (e.code === 'AUTH_REQUIRED') {
           for (const side of ['A', 'B']) {

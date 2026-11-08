@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,9 @@ export const config = {
   discoveryDir: path.join(DATA_DIR, 'discovery'),
   modelsDir: path.join(DATA_DIR, 'models'),
   maxParallelRuns: int(process.env.MAX_PARALLEL_RUNS, 1),
+  // Pages tested at the same time within a run (each worker opens A and B in
+  // its own tabs). Size this to the machine: about one worker per 1–2 vCPUs.
+  parallelPages: Math.max(1, Math.min(8, int(process.env.PARALLEL_PAGES, Math.max(1, Math.min(3, Math.floor(os.availableParallelism() / 2)))))),
   headless: bool(process.env.HEADLESS, true),
   // Optional shared secret. When set, every /api request must send it as
   // "Authorization: Bearer <token>" (the UI prompts for it once).
@@ -82,6 +86,8 @@ export const config = {
     allowNoKey: bool(process.env.AI_ALLOW_NO_KEY, false), // self-hosted NIM without auth
     allowImages: bool(process.env.AI_ALLOW_IMAGES, true),
     autoAnalyze: bool(process.env.AI_AUTO_ANALYZE, true),
+    // Hidden reasoning for the structured summaries (slower, and long answers can be cut off).
+    thinking: bool(process.env.AI_THINKING, false),
     maxVisionItems: int(process.env.AI_MAX_VISION_ITEMS, 8),
     timeoutMs: int(process.env.AI_TIMEOUT_MS, 180000),
   },

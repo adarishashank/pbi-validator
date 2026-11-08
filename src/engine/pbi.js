@@ -33,7 +33,8 @@ export class PbiReport {
     this.pageItemSelector = null;
     this.reloads = 0;
     this.popups = [];
-    page.context().on('page', (p) => this.popups.push(p));
+    // Only windows this tab opens (other tabs of the same browser context belong to other workers).
+    page.on('popup', (p) => this.popups.push(p));
   }
 
   // ------------------------------------------------------------------ load
@@ -282,7 +283,7 @@ export class PbiReport {
   async restore(ref, baseline, softUndo) {
     const tol = Math.max(this.cfg.thresholds.maxDiffRatio, 0.0005);
     await this.closePopups();
-    await this.page.keyboard.press('Escape').catch(() => {});
+    await this.dismissOverlays();
     if (softUndo) {
       try { await softUndo(); await this.waitStable(); } catch (e) { this.log('debug', `soft undo failed: ${e.message}`); }
     }
@@ -292,7 +293,10 @@ export class PbiReport {
     await this.reloadToPage(ref);
     shot = await this.screenshotCanvas();
     const r = quickRatio(shot, baseline, this.cfg.thresholds.pixelThreshold);
-    if (r > tol) this.log('warn', `Page "${ref.name}" differs from its initial state after reload (${(r * 100).toFixed(2)}%) — report may contain dynamic content`);
+    if (r > tol) {
+      this.log('warn', `Page "${ref.name}" differs from its initial state after reload (${(r * 100).toFixed(2)}%): using this state as the new starting point, so later checks don't reload again`);
+      return { reloaded: true, drifted: true, shot };
+    }
     return { reloaded: true };
   }
 
@@ -399,12 +403,30 @@ export class PbiReport {
   }
 
   /** Opens a dropdown slicer if needed and returns the selectable item labels. */
+  /**
+   * Closes leftover dropdowns, menus and their invisible backdrops (Power BI's
+   * cdk overlays), which otherwise swallow the next click.
+   */
+  async dismissOverlays() {
+    await this.page.keyboard.press('Escape').catch(() => {});
+    const backdrop = this.frame.locator('.cdk-overlay-backdrop-showing');
+    for (let i = 0; i < 3 && (await backdrop.count().catch(() => 0)); i++) {
+      await backdrop.last().click({ force: true, timeout: 2000 }).catch(() => {});
+      await sleep(200);
+    }
+  }
+
   async slicerItems(v) {
     const vc = this.frame.locator(this.sel.visualContainer).nth(v.domIndex);
     let scope = vc;
     let items = vc.locator(this.sel.slicerItem);
     if (v.slicer?.hasDropdown) {
-      await vc.locator(this.sel.slicerDropdown).first().click({ timeout: this.cfg.timing.actionTimeoutMs });
+      await this.dismissOverlays();
+      const dd = vc.locator(this.sel.slicerDropdown).first();
+      await dd.click({ timeout: this.cfg.timing.actionTimeoutMs }).catch(async () => {
+        await this.dismissOverlays();
+        await dd.click({ timeout: this.cfg.timing.actionTimeoutMs, force: true });
+      });
       await sleep(700);
       scope = this.frame.locator('body');
       items = this.frame.locator(`${this.sel.slicerItem}:visible`);

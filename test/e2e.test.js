@@ -135,6 +135,14 @@ test('A vs B: every scenario detects the planted regressions', { timeout: 600000
   assert.equal(ch.pages.find((p) => p.name === 'Archive').state, 'removed');
   assert.equal(ch.report.model.changes.length, 2);
   assert.match(ch.report.headline, /pages: 1 removed, 1 renamed/);
+  // Ranked for the Power BI team: P1 first (model change, changed numbers, missing page).
+  const top = ch.report.top;
+  assert.equal(top[0].priority, 'P1');
+  assert.ok(top.some((t) => t.area === 'Data model' && /Total Sales/.test(t.title) && t.priority === 'P1'), JSON.stringify(top.slice(0, 4)));
+  assert.ok(top.some((t) => t.area === 'Numbers' && /Total Sales/.test(t.title) && /280,000 → 285,285/.test(t.evidence)), JSON.stringify(top));
+  assert.ok(top.some((t) => t.area === 'Page' && /"Archive" is missing in B/.test(t.title)));
+  assert.ok(top.every((t, i) => i === 0 || ['P1', 'P2', 'P3'].indexOf(top[i - 1].priority) <= ['P1', 'P2', 'P3'].indexOf(t.priority)), 'sorted by priority');
+  assert.ok(top.every((t) => t.refs.every((n) => results.some((x) => x.seq === n))), 'refs point at real checks');
 
   assert.equal(find(results, 'error').length, 0);
   assert.equal(results.filter((r) => r.status === 'error').length, 0, dump());
@@ -162,6 +170,7 @@ test('exports: PDF report and Excel workbook are built from a real run', { timeo
   assert.match(htmlDoc, /Go to Details/);
   assert.match(htmlDoc, /<img src="/, 'problem screenshots embedded');
   assert.match(htmlDoc, /<h2>What changed<\/h2>/);
+  assert.match(htmlDoc, /<h2>Action items for the Power BI team<\/h2>/);
   assert.match(htmlDoc, /lvl lvl-high">Removed/, 'Archive page shown as removed');
   assert.match(htmlDoc, /<h3>Data model<\/h3>/);
   assert.match(htmlDoc, /Value changes \(\d+\)/);
@@ -174,8 +183,8 @@ test('exports: PDF report and Excel workbook are built from a real run', { timeo
   const sheets = runSheets(bundle);
   const names = sheets.map((x) => x.name);
   for (const n of ['What changed', 'Model changes', 'Value changes']) assert.ok(names.includes(n), `${n} sheet: ${names}`);
-  assert.deepEqual(sheets.map((s) => s.name), ['Summary', 'Checks', 'What changed', 'Model changes', 'Value changes']);
-  assert.equal(sheets[1].rows.length, bundle.results.length);
+  assert.deepEqual(sheets.map((s) => s.name), ['Summary', 'Action items', 'Checks', 'What changed', 'Model changes', 'Value changes']);
+  assert.equal(sheets.find((x) => x.name === 'Checks').rows.length, bundle.results.length);
   const xlsx = await xlsxBuffer(sheets);
   assert.equal(xlsx.subarray(0, 2).toString(), 'PK', 'xlsx is a zip');
   assert.ok(xlsx.includes(Buffer.from('xl/worksheets/sheet2.xml')));
@@ -206,4 +215,22 @@ test('accepted differences are recognised in the next real run of the suite', { 
   assert.equal(status, 'failed', 'other missing visuals still fail the run');
   const run = db.q.get('SELECT summary FROM runs WHERE id = ?', runId);
   assert.equal(run.summary.byStatus.accepted, 3);
+});
+
+test('time budget: every page still gets its static checks; interactions beyond the budget are reported as skipped', { timeout: 300000 }, async () => {
+  const t0 = Date.now();
+  // 0.8 min budget: interactions stop ~3 s after the start (45 s are kept in reserve).
+  const { results, status } = await runSuite('budget', `${base}?v=a`, `${base}?v=b`, { timing: { ...FAST.timing, budgetMinutes: 0.8 }, limits: { parallelPages: 2 } });
+  const secs = (Date.now() - t0) / 1000;
+  const pagesWith = (sc) => new Set(results.filter((r) => r.scenario === sc).map((r) => r.page));
+  for (const p of ['Overview', 'Details', 'Trends']) {
+    assert.ok(pagesWith('page_render').has(p), `page render of ${p}`);
+    assert.ok(pagesWith('visual').has(p), `visual data of ${p}`);
+  }
+  const skipped = results.filter((r) => r.scenario === 'budget');
+  assert.ok(skipped.length >= 1, 'interactions reported as skipped');
+  assert.ok(skipped.every((r) => r.status === 'skipped' && /time budget/.test(r.title)));
+  assert.ok(results.filter((r) => ['button', 'slicer', 'drill', 'tooltip', 'cross_filter'].includes(r.scenario)).length < 5, 'interactions mostly not run');
+  assert.notEqual(status, 'error');
+  assert.ok(secs < 60, `finished quickly (${secs.toFixed(0)} s)`);
 });

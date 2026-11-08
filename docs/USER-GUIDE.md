@@ -264,6 +264,8 @@ For a comparison run, the **What changed** tab answers "what is different in B?"
 ![What changed: headline, totals, data model and the page heatmap](images/f7-what-changed.jpg)
 *Figure 13. What changed: headline, totals, data model and the page heatmap*
 
+At the top, **Action items for the Power BI team** lists what to look into first: priority **P1** (wrong or changed numbers, missing pages or visuals, data model or security changes), **P2** (behaviour users notice) and **P3** (cosmetic or new things), each with the exact before → after, the likely cause, who should act, and links to the checks. When AI is configured the list is written by the AI, which groups everything caused by one change into one item; otherwise it is ranked automatically. The same list opens the PDF report and is a sheet in the Excel export.
+
 Click a page tile to open that page (Figure 14):
 
 - **Layout**: visuals added, removed, moved, resized or retitled.
@@ -383,6 +385,9 @@ On the same tab, **coverage limits** set how much is tested (for example values 
 #### Advanced
 
 Browser size, language, time zone, timeouts and the maximum number of visuals per page. Leave these at their defaults unless a report needs more time to load.
+
+- **Time budget (minutes)**, default 15: every page always gets its screenshot, layout and data checks; buttons, slicers, drills and other interactions use the remaining time. Interactions that don't fit are listed as **Skipped: time budget**. Set 0 for no limit.
+- **Pages tested at the same time**: 0 uses the server's setting. More pages at once is faster only if the server has the processing power for it.
 
 > **Tip:** Start with the defaults and run once. To make sure a suite raises no false alarms, create a copy with the **same report as A and B**: it should pass. Then tune tolerances and ignores to remove noise.
 
@@ -518,6 +523,7 @@ Each extra level is one more click and comparison per visual, roughly **3 to 10 
 | **A scheduled run did not happen** | Check the schedule on the suite card (times are India Standard Time). A run more than 24 hours late is skipped rather than run late. |
 | **Data model: "not compared" (Skipped)** | The model could not be identified, for example for a publish-to-web link. An editor uploads a .pbit, model.bim or TMDL file on the report link (4.12). |
 | **Data model: "Could not read the data model" (Warning)** | The account reading it lacks Build permission on the semantic model, or the sign-in expired. Grant access, sign in again, or upload a model file instead. |
+| **Some checks say "Skipped: time budget"** | The run reached its time limit (15 minutes by default) before every interaction was tried; screenshots, layout and data were still checked on every page. Raise the budget, limit the pages, or test more pages at the same time. |
 | **Runs got much slower** | Check the suite's drill depth and data points (4.12). Lower them, or limit the pages tested. |
 | **Microsoft blocks the sign-in ("You can't get there from here", device not compliant)** | Your organisation only allows sign-ins from managed devices. Use a test account that is allowed to sign in from servers, or ask an administrator to sign in with **npm run login** on a managed computer and **Import** the session. |
 | **Numbers differ only by rounding** | Set a numeric tolerance on the suite, for example 0.001. |

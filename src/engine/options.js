@@ -40,6 +40,8 @@ export const SuiteConfigSchema = z.object({
     tooltipsPerPage: z.number().int().min(0).max(50).default(4),
     matrixExpandRows: z.number().int().min(1).max(20).default(3),
     maxVisualsPerPage: z.number().int().min(1).max(500).default(150),
+    // Pages tested at the same time (each needs its own browser tabs). 0 = server default (PARALLEL_PAGES).
+    parallelPages: z.number().int().min(0).max(8).default(0),
   }).prefault({}),
   thresholds: z.object({
     pixelThreshold: z.number().min(0).max(1).default(0.1),     // pixelmatch per-pixel colour tolerance
@@ -56,6 +58,10 @@ export const SuiteConfigSchema = z.object({
   }).prefault({}),
   timing: z.object({
     loadTimeoutMs: z.number().int().min(10000).max(600000).default(120000),
+    // Target run time. Every page always gets its screenshot, layout and data
+    // checks; interactions (buttons, slicers, drills…) use the remaining time
+    // and are reported as skipped when it runs out. 0 = no limit.
+    budgetMinutes: z.number().min(0).max(600).default(15),
     stableTimeoutMs: z.number().int().min(2000).max(300000).default(45000),
     settleMs: z.number().int().min(0).max(30000).default(700),
     actionTimeoutMs: z.number().int().min(1000).max(120000).default(15000),

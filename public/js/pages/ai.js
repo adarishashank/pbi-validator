@@ -5,7 +5,7 @@ const SEV = { critical: 'fail', high: 'fail', medium: 'diff', low: 'warn', info:
 const RISK = { critical: 'fail', high: 'fail', medium: 'diff', low: 'warn', none: 'pass' };
 
 /** Renders "#12" references as links that open the matching result. */
-function Refs({ refs, onOpen }) {
+export function Refs({ refs, onOpen }) {
   if (!refs?.length) return null;
   return html`<span class="row" style="gap:4px;display:inline-flex">${refs.slice(0, 12).map((n) => html`<a href="javascript:void 0" class="tag" onClick=${(e) => { e.preventDefault(); onOpen(n); }}>#${n}</a>`)}</span>`;
 }
@@ -38,6 +38,25 @@ function Md({ text, onOpen }) {
   })}</div>`;
 }
 
+const PRIO = { P1: 'fail', P2: 'warn', P3: 'skipped' };
+/**
+ * "What the Power BI team should look into": AI action items when available,
+ * otherwise the rule-based ranking. Same layout either way.
+ */
+export function ActionItems({ items, fromAi, model, onOpenRef }) {
+  if (!items?.length) return null;
+  return html`<div class="panel"><div class="panel-h"><h2>Action items for the Power BI team</h2>
+    <span class="muted small">${fromAi ? `${items.length} item${items.length === 1 ? '' : 's'}, prioritised by AI (${model || 'AI'}): verify before acting` : `Top ${items.length}, ranked automatically: P1 numbers, missing content and model changes first`}</span></div>
+    <table class="t act-items"><thead><tr><th>Priority</th><th>What to look into</th><th>What changed</th>${fromAi ? html`<th>Likely cause → action</th>` : html`<th>Who</th>`}<th>Checks</th></tr></thead><tbody>
+    ${items.map((x) => html`<tr>
+      <td><${Badge} s=${PRIO[x.priority] || 'skipped'} label=${x.priority} /></td>
+      <td><b>${x.title}</b><div class="small muted">${[x.area, x.page, x.object].filter(Boolean).join(' · ')}</div>${x.impact ? html`<div class="small">${x.impact}</div>` : ''}</td>
+      <td class="small mono">${x.whatChanged || x.evidence || ''}</td>
+      ${fromAi ? html`<td class="small">${x.likelyCause ? html`<div>${x.likelyCause}</div>` : ''}${x.action ? html`<div style="color:var(--accent-2)">→ ${x.action}</div>` : ''}${x.owner ? html`<div class="muted">${x.owner}</div>` : ''}</td>` : html`<td class="small">${x.owner}</td>`}
+      <td><${Refs} refs=${x.resultRefs || x.refs} onOpen=${onOpenRef} /></td></tr>`)}
+    </tbody></table></div>`;
+}
+
 export function AiNotConfigured({ status }) {
   return html`<div class="callout info">🤖 <div><b>AI analysis is not configured.</b> Add a free NVIDIA API key to <code>.env</code> and restart:
     <pre class="json" style="margin:8px 0">NVIDIA_API_KEY=nvapi-…   # https://build.nvidia.com → Get API Key</pre>
@@ -64,6 +83,7 @@ export function AiInsights({ run, ai, onOpenRef, reload }) {
     ${!S && !running && !ai.summary?.error && html`<div class="panel"><div class="empty"><h3>No AI analysis yet</h3>${live ? 'It starts automatically when the run finishes.' : 'Click “Analyse with AI” for an executive summary, root-cause triage, data-anomaly review and screenshot explanations.'}</div></div>`}
     ${ai.summary?.status === 'error' && html`<div class="callout err">AI summary failed: ${ai.summary.error}</div>`}
 
+    ${S?.actionItems?.length > 0 && html`<${ActionItems} items=${S.actionItems} fromAi model=${ai.summary.model} onOpenRef=${onOpenRef} />`}
     ${S && html`<div class="panel ai-panel"><div class="panel-b stack">
       <div class="row"><h2 style="flex:1">${S.headline}</h2><${Badge} s=${RISK[S.risk] || 'skipped'} label=${`${S.risk || '?'} risk`} /></div>
       <p style="margin:0">${S.summary}</p>

@@ -120,7 +120,62 @@ export function runChanges(runId) {
     headline: headline(totals, inv),
     model,
   };
+  report.top = topDifferences({ report, pages }, results);
   return { run: { id: run.id, suite: run.suite_name, status: run.status, reports: run.snapshot?.reports || {} }, report, pages };
+}
+
+const EXPR_FIELD = /^(DAX|Source query|Row filter|Expression)/;
+const clip = (v, n = 60) => { const t = String(v ?? ''); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+
+/**
+ * The differences the Power BI team should look at first, ranked without AI:
+ * P1 = wrong numbers, removed content, broken visuals, model/security changes;
+ * P2 = behaviour and layout that users will notice; P3 = additions and cosmetics.
+ * Accepted differences are left out.
+ */
+export function topDifferences(ch, results, max = 12) {
+  const seqOf = new Map(results.map((r) => [r.id, r.seq]));
+  const items = [];
+  const add = (o) => items.push({ refs: (o.ids || []).map((id) => seqOf.get(id)).filter(Boolean), ...o });
+  const rp = ch.report;
+  for (const name of rp.removed) add({ priority: 'P1', area: 'Page', page: name, title: `Page "${name}" is missing in B`, evidence: 'Exists only in A', owner: 'Report developer', ids: ch.pages.find((p) => p.name === name)?.renderResultId ? [ch.pages.find((p) => p.name === name).renderResultId] : [] });
+  for (const c of rp.model?.changes || []) {
+    if (c.accepted) continue;
+    const kind = c.kind;
+    const fields = (c.fields || []).map((f) => f.label);
+    const p1 = c.change === 'removed' || ['role', 'relationship'].includes(kind) || (kind === 'measure' && c.change === 'changed' && fields.some((f) => /DAX|table/i.test(f)))
+      || (kind === 'column' && c.change === 'changed' && fields.some((f) => /Data type|DAX/i.test(f))) || (kind === 'table' && fields.some((f) => /Source/i.test(f)));
+    const expr = (x) => clip(String(x || '').replace(/\s+/g, ' ').trim(), 45) || '(none)';
+    const ev = (c.fields || []).map((f) => (EXPR_FIELD.test(f.label) ? `${f.label}: ${expr(c.exprA || f.a)} → ${expr(c.exprB || f.b)}` : `${f.label}: ${clip(f.a, 30) || '(none)'} → ${clip(f.b, 30) || '(none)'}`)).join('; ')
+      || (c.change === 'added' ? `Only in B${c.exprB ? `: ${expr(c.exprB)}` : ''}` : c.change === 'removed' ? `Only in A${c.exprA ? `: ${expr(c.exprA)}` : ''}` : 'Differs');
+    add({ priority: p1 ? 'P1' : c.change === 'added' ? 'P3' : 'P2', area: 'Data model', page: '', title: c.title, evidence: ev, owner: 'Semantic model owner', ids: [c.resultId] });
+  }
+  for (const p of ch.pages) {
+    if (p.state === 'removed' || p.state === 'added') continue;
+    for (const h of p.health) add({ priority: 'P1', area: 'Visual error', page: p.name, title: `${h.visual} shows an error in ${h.side}`, evidence: clip(h.error, 80), owner: 'Report developer', ids: [] });
+    for (const v of p.values) {
+      if (v.status === 'accepted') continue;
+      const chg = v.changes.slice(0, 3).map((c) => (c.op === 'chg' ? `${clip(c.a, 25)} → ${clip(c.b, 25)}` : c.op === 'add' ? `+ ${clip(c.b, 25)}` : `− ${clip(c.a, 25)}`)).join('; ');
+      add({ priority: 'P1', area: 'Numbers', page: p.name, title: `${v.visual} shows different values`, evidence: `${chg}${v.changes.length > 3 ? ` (+${v.changes.length - 3} more)` : ''}`, owner: 'Data / model owner', ids: [v.resultId] });
+    }
+    for (const v of p.visualsChanged) {
+      if (!v.missingIn || v.status === 'accepted') continue;
+      add({ priority: v.missingIn === 'B' ? 'P2' : 'P3', area: 'Visual', page: p.name, title: v.title, evidence: v.missingIn === 'B' ? 'Missing in B' : 'New in B', owner: 'Report developer', ids: [v.resultId] });
+    }
+    for (const i of p.interactions) {
+      if (i.status === 'accepted') continue;
+      add({ priority: i.status === 'fail' || i.status === 'error' ? 'P2' : 'P3', area: 'Interaction', page: p.name, title: i.title, evidence: clip(i.summary, 90), owner: 'Report developer', ids: [i.resultId] });
+    }
+    for (const l of p.layout) {
+      if (l.change === 'added' || l.change === 'removed') continue; // covered as visuals
+      add({ priority: 'P3', area: 'Layout', page: p.name, title: `${l.visual} ${l.change}`, evidence: l.change === 'retitled' ? `"${l.a}" → "${l.b}"` : '', owner: 'Report developer', ids: [] });
+    }
+  }
+  for (const name of rp.added) add({ priority: 'P3', area: 'Page', page: name, title: `New page "${name}" in B`, evidence: 'Not compared', owner: 'Report developer', ids: [] });
+  const rank = { P1: 0, P2: 1, P3: 2 };
+  const areaRank = { 'Data model': 0, Numbers: 1, Page: 2, 'Visual error': 3, Visual: 4, Interaction: 5, Layout: 6 };
+  return items.sort((a, b) => rank[a.priority] - rank[b.priority] || (areaRank[a.area] ?? 9) - (areaRank[b.area] ?? 9)).slice(0, max)
+    .map(({ ids, ...x }) => ({ ...x, resultIds: ids }));
 }
 
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;

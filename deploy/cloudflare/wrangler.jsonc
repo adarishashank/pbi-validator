@@ -35,6 +35,8 @@
     "SYNC_INTERVAL_SECONDS": "30",
     "RUN_RETENTION_DAYS": "30",
     "MAX_PARALLEL_RUNS": "1",
+    // Pages tested at the same time. Keep 1 on standard-1 (half a vCPU); about 3 on standard-4.
+    "PARALLEL_PAGES": "1",
     "LOG_LEVEL": "info"
   }
 }

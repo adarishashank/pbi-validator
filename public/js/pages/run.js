@@ -228,9 +228,17 @@ export function RunDetail({ id }) {
   const pages = useMemo(() => [...new Set(results.map((r) => r.page))], [results]);
   const scenarios = useMemo(() => [...new Set(results.map((r) => r.scenario))], [results]);
   const counts = useMemo(() => results.reduce((m, r) => ({ ...m, [r.status]: (m[r.status] || 0) + 1 }), {}), [results]);
+  // Results arrive page by page from several tabs and in two passes: show them grouped in report page order.
+  const pageRank = useMemo(() => {
+    const order = results.find((r) => r.scenario === 'report_pages')?.details?.pagesA || [];
+    const m = new Map([['', -1], ...order.map((p, i) => [p, i])]);
+    for (const r of results) if (!m.has(r.page)) m.set(r.page, m.size + 1000);
+    return m;
+  }, [results]);
   const filtered = useMemo(() => results.filter((r) => (!f.status || r.status === f.status) && (!f.scenario || r.scenario === f.scenario)
     && (f.page === '' || r.page === f.page) && (!f.problems || PROBLEM.has(r.status))
-    && (!f.q || `${r.title} ${r.page} ${r.target}`.toLowerCase().includes(f.q.toLowerCase()))), [results, f]);
+    && (!f.q || `${r.title} ${r.page} ${r.target}`.toLowerCase().includes(f.q.toLowerCase())))
+    .sort((a, b) => (pageRank.get(a.page) - pageRank.get(b.page)) || a.seq - b.seq), [results, f, pageRank]);
   const byScenario = useMemo(() => {
     const m = {};
     for (const r of results) { m[r.scenario] ??= {}; m[r.scenario][r.status] = (m[r.scenario][r.status] || 0) + 1; }
@@ -263,7 +271,7 @@ export function RunDetail({ id }) {
           ${reps.B && html`<span>⇄</span><span class="side-pill" title=${reps.B?.url}><b>B</b>${reps.B.name}${reps.B.environment ? ` · ${reps.B.environment}` : ''}</span>`}
           <span class="spacer"></span>${run.summary?.loadMs && html`<span class="small muted">Load: ${Object.entries(run.summary.loadMs).map(([k, v]) => `${k} ${fmtDur(v)}`).join(' · ')}</span>`}</div>
         ${live && html`<div><div class="row small" style="margin-bottom:6px"><${Spinner} /><b>${run.phase || 'Starting'}</b><span class="spacer"></span>${Math.round((run.progress || 0) * 100)}%</div><${Progress} value=${run.progress} /></div>`}
-        ${run.error && html`<div class="callout err">✖ <div>${run.error}${/no Power BI sign-in selected/i.test(run.error) ? html` <a href="#/reports">Open Report links</a>` : /sign-in|expired/i.test(run.error) ? html` <a href="#/profiles">Open Power BI sign-ins</a>` : ''}</div></div>`}
+        ${run.error && html`<div class="callout err">✖ <div>${String(run.error).split(/\n|Call log:/)[0].slice(0, 400)}${/no Power BI sign-in selected/i.test(run.error) ? html` <a href="#/reports">Open Report links</a>` : /sign-in|expired/i.test(run.error) ? html` <a href="#/profiles">Open Power BI sign-ins</a>` : ''}</div></div>`}
         <div class="row">
           <span class="chip ${!f.status && !f.problems ? 'on' : ''}" onClick=${() => setF({ ...f, status: '', problems: false })}>All <span class="n">${results.length}</span></span>
           <span class="chip ${f.problems && !f.status ? 'on' : ''}" onClick=${() => setF({ ...f, status: '', problems: true })}>Problems <span class="n">${results.filter((r) => PROBLEM.has(r.status)).length}</span></span>
@@ -308,7 +316,7 @@ export function RunDetail({ id }) {
           <td>${Object.values(m).reduce((a, b) => a + b, 0)}</td></tr>`)}
       </tbody></table></div>`}
 
-      ${tab === 'changes' && html`<${WhatChanged} run=${run} version=${results.map((r) => r.status).join('')} onOpen=${(rid) => { const r = results.find((x) => x.id === rid); if (r) openResult(r, results); }} />`}
+      ${tab === 'changes' && html`<${WhatChanged} run=${run} ai=${ai} onOpenRef=${openRef} version=${results.map((r) => r.status).join('')} onOpen=${(rid) => { const r = results.find((x) => x.id === rid); if (r) openResult(r, results); }} />`}
       ${tab === 'ai' && html`<${AiInsights} run=${run} ai=${ai} onOpenRef=${openRef} reload=${reloadAi} />`}
       ${tab === 'ask' && html`<${AiChat} run=${run} ai=${ai} onOpenRef=${openRef} />`}
       ${tab === 'logs' && html`<div class="logs" ref=${logRef}>${logs.map((l) => html`<div class=${l.level}><span class="ts">${(l.ts || '').slice(11, 19)}</span>${l.message}</div>`)}</div>`}

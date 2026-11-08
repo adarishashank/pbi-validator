@@ -47,10 +47,13 @@ export function parseJsonLoose(text) {
  * OpenAI-compatible chat completion (NVIDIA API catalog, self-hosted NIM,
  * vLLM, Ollama…). Retries on rate limits and transient errors.
  */
-export async function chat({ model, messages, maxTokens = 2048, temperature = 0.2, json = false, timeoutMs = config.ai.timeoutMs }) {
+export async function chat({ model, messages, maxTokens = 2048, temperature = 0.2, json = false, thinking = null, timeoutMs = config.ai.timeoutMs }) {
   if (!aiStatus().configured) throw new AiError('AI is not configured: set NVIDIA_API_KEY (get one free at build.nvidia.com) or AI_BASE_URL for a self-hosted NIM.', 503);
   const body = { model, messages, max_tokens: maxTokens, temperature, top_p: 0.9, stream: false };
   if (json) body.response_format = { type: 'json_object' };
+  // Reasoning ("thinking") models spend output tokens on hidden reasoning before
+  // the answer, which can cut a long JSON answer off. Structured calls turn it off.
+  if (thinking === false) body.chat_template_kwargs = { enable_thinking: false };
   let lastErr;
   for (let attempt = 0; attempt < 4; attempt++) {
     const ac = new AbortController();
@@ -71,6 +74,7 @@ export async function chat({ model, messages, maxTokens = 2048, temperature = 0.
       if (!res.ok) {
         // Some endpoints reject response_format; retry once without it.
         if (res.status === 400 && body.response_format && /response_format|json/i.test(text)) { delete body.response_format; continue; }
+        if (res.status === 400 && body.chat_template_kwargs && /chat_template|kwargs|thinking/i.test(text)) { delete body.chat_template_kwargs; continue; }
         const hint = res.status === 401 || res.status === 403 ? ' — check NVIDIA_API_KEY' : res.status === 404 ? ` — model "${model}" not available on this endpoint (set AI_TEXT_MODEL / AI_VISION_MODEL)` : '';
         const retryable = res.status === 429 || res.status >= 500;
         const err = new AiError(`AI endpoint ${res.status}${hint}: ${text.slice(0, 300)}`, retryable ? 503 : 502, retryable);
@@ -79,8 +83,10 @@ export async function chat({ model, messages, maxTokens = 2048, temperature = 0.
       }
       const data = JSON.parse(text);
       const content = data.choices?.[0]?.message?.content ?? '';
+      const finish = data.choices?.[0]?.finish_reason;
+      if (finish === 'length') logger.warn(`${model} reply was cut off at max_tokens=${maxTokens} (${data.usage?.completion_tokens ?? '?'} tokens)`);
       logger.debug(`${model} ${Date.now() - t0}ms tokens=${data.usage?.total_tokens ?? '?'}`);
-      return { content: stripReasoning(content), usage: data.usage || null, model: data.model || model, ms: Date.now() - t0 };
+      return { content: stripReasoning(content), usage: data.usage || null, model: data.model || model, ms: Date.now() - t0, finish };
     } catch (e) {
       if (e instanceof AiError && !e.retryable) throw e;
       lastErr = e.name === 'AbortError' ? new AiError(`AI request timed out after ${Math.round(timeoutMs / 1000)}s`, 504) : e;
@@ -93,6 +99,7 @@ export async function chat({ model, messages, maxTokens = 2048, temperature = 0.
 }
 
 export async function chatJson(opts) {
+  opts = { thinking: config.ai.thinking, ...opts };
   const r = await chat({ ...opts, json: true });
   try {
     return { ...r, json: parseJsonLoose(r.content) };
@@ -103,6 +110,7 @@ export async function chatJson(opts) {
       maxTokens: opts.maxTokens,
       messages: [...opts.messages, { role: 'assistant', content: r.content }, { role: 'user', content: 'Your previous reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.' }],
       json: true,
+      thinking: opts.thinking,
     });
     return { ...fix, json: parseJsonLoose(fix.content) };
   }

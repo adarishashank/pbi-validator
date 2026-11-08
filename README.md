@@ -59,6 +59,13 @@ Each comparison run has a **What changed** tab: a one-line headline (pages remov
 
 Options 2 and 3 need an app.powerbi.com link with workspace and report IDs (`/groups/…/reports/…`). Security roles are read only with admin rights on the model. Whitespace-only DAX changes are ignored. Every model difference is its own check, so intended changes can be *accepted as expected*.
 
+## Speed: time budget and parallel pages
+
+* **Time budget** (suite → Advanced, default **15 minutes**): every page always gets its screenshot, layout and data checks first; interactions (buttons, slicers, drills, drill-through, cross-filter, tooltips) then run in the remaining time, and any that don't fit are listed as *Skipped: time budget*. Runs therefore finish in about the budget, whatever the report size.
+* **Parallel pages** (`PARALLEL_PAGES`, or per suite *Pages tested at the same time*): each worker opens A and B in its own tabs and takes the next page. Plan about one worker per 1–2 vCPUs; on Cloudflare `standard-1` (half a vCPU) keep 1.
+* A page whose content never returns to its first screenshot (live data, persisted filters) is re-baselined after one reload instead of being reloaded after every check.
+* **Action items for the Power BI team** head the *What changed* tab, the AI insights and the PDF/Excel: ranked P1–P3 with the exact before → after, likely cause, owner and links to the checks. With AI configured they're written by the model (one item per cause, e.g. a changed measure and every number it moved); without AI they're ranked by rules. Structured AI calls run with the model's hidden reasoning off (`AI_THINKING=false`), which keeps answers complete and fast.
+
 ## Accepting expected differences, schedules and trends
 
 * **Accept as expected**: open a check with a difference and click *Accept as expected*. Choose *this exact difference* (later runs accept it while the changed values/behaviour stay the same, and flag it again if they change) or *any difference in this check*. Accepted checks show as **Accepted**, don't count as problems, are listed with who/why in the PDF and Excel exports, and can be managed in the suite editor's *Accepted differences* tab.

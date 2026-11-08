@@ -5,6 +5,7 @@ import { q, insert, update } from '../db.js';
 import { createLogger } from '../logger.js';
 import { chat, chatJson, imagePart, aiStatus } from './client.js';
 import { buildComparisonImage, singleImage } from './images.js';
+import { runChanges } from '../jobs/changes.js';
 
 const logger = createLogger('ai');
 const runDirOf = (runId) => path.join(config.runsDir, String(runId));
@@ -62,7 +63,21 @@ export function buildRunDigest(runId, maxChars = 28000) {
     if (body.length + line.length > maxChars) { body += `\n… ${problems.length - body.split('\n#').length} more problem results omitted`; break; }
     body += `${line}\n`;
   }
-  return { run, results, text: `${head}\n\nNON-PASSING CHECKS (#id = result reference):\n${body || '(none — every check passed)'}` };
+  // Structured overview (same as the "What changed" tab), so the model starts from facts.
+  let overview = '';
+  try {
+    const ch = runChanges(runId);
+    if (ch && snap.reports?.B) {
+      const m = ch.report.model;
+      overview = [
+        `WHAT CHANGED (A → B): ${ch.report.headline}`,
+        m ? `Data model: ${m.compared ? `${m.changes.length} difference(s): ${m.changes.slice(0, 25).map((c) => `${c.title}${c.fields?.length ? ` [${c.fields.map((f) => (/^(DAX|Source query|Row filter|Expression)/.test(f.label) ? `${f.label}: ${clip(String(c.exprA || f.a).replace(/\s+/g, ' '), 120)} → ${clip(String(c.exprB || f.b).replace(/\s+/g, ' '), 120)}` : `${f.label}: ${clip(f.a, 40) || '(none)'} → ${clip(f.b, 40) || '(none)'}`)).join('; ')}]` : ''}`).join(' | ')}` : m.note}` : null,
+        `Pages: ${ch.pages.map((p) => `${p.name}=${p.state === 'unchanged' ? 'unchanged' : `${p.level}${p.valuesChanged ? `, ${p.valuesChanged} values` : ''}${p.layout.length ? `, ${p.layout.length} layout` : ''}${p.interactions.length ? `, ${p.interactions.length} interactions` : ''}`}`).join('; ')}`,
+        `RANKED BY RULES (P1 highest): ${ch.report.top.map((t) => `${t.priority} ${t.area}${t.page ? ` @${t.page}` : ''}: ${t.title} — ${t.evidence}${t.refs.length ? ` (#${t.refs.join(', #')})` : ''}`).join(' | ')}`,
+      ].filter(Boolean).join('\n');
+    }
+  } catch { /* overview is optional */ }
+  return { run, results, text: `${head}${overview ? `\n\n${clip(overview, 9000)}` : ''}\n\nNON-PASSING CHECKS (#id = result reference):\n${body || '(none — every check passed)'}` };
 }
 
 /** Extracted values per page/visual, for anomaly detection and Q&A. */
@@ -87,12 +102,14 @@ export function buildValueDigest(results, maxChars = 22000) {
 
 // ---------------------------------------------------------------- prompts
 const SYSTEM = `You are a senior Power BI QA analyst. You review automated end-to-end validation results that compare a baseline report (A) with a candidate report (B), or validate a single report.
-Scenarios: report_pages (page inventory), health (visual errors), page_render (full-page screenshot diff), structure (visual layout/inventory), visual (per-visual screenshot + extracted data), button (action buttons/navigators), slicer (applied slicer values), drill (hierarchy drill/expand), matrix_expand, cross_filter (clicking data points), tooltip.
-Statuses: fail = functional mismatch; missing = exists on one side only; diff = visual or data difference; warn = interaction had no visible effect; error = the tool could not execute the step.
+Scenarios: report_pages (page inventory), model (semantic model: tables, columns, measures/DAX, relationships, security roles), health (visual errors), page_render (full-page screenshot diff), structure (visual layout/inventory), visual (per-visual screenshot + extracted data), button (action buttons/navigators), slicer (applied slicer values), drill (hierarchy drill/expand, several levels), drill_through, matrix_expand, cross_filter (clicking data points), tooltip, budget (interactions skipped because the run's time limit was reached — coverage gap, not a defect).
+Statuses: fail = functional mismatch; missing = exists on one side only; diff = visual or data difference; warn = interaction had no visible effect; error = the tool could not execute the step; accepted = an editor marked the difference as intended (do not report it as a problem).
+Your audience is the Power BI team (report developers and semantic model owners). They need to know exactly what to look at: which page, which visual or model object, the exact before/after values, and the likely cause.
 Be precise and evidence-based: cite result references as numbers (the #id), never invent values that are not in the input, and distinguish real regressions from rendering noise (sub-pixel shifts, anti-aliasing, animation).`;
 
 const SUMMARY_SCHEMA = `{
-  "headline": "one sentence verdict",
+  "actionItems": [{"priority": "P1 | P2 | P3", "title": "what the Power BI team must look into (one line)", "area": "Data model | Numbers | Page | Visual | Interaction | Layout | Security", "page": "page name or empty for report/model level", "object": "visual title or model object, e.g. [Total Sales] or Sales[Region]", "whatChanged": "exact before → after from the input (values, DAX, data type, destination page)", "impact": "what report users would see or get wrong", "likelyCause": "most likely cause in the report or model", "action": "concrete thing to check or fix", "owner": "Report developer | Semantic model owner | Data engineering", "resultRefs": [3]}],
+  "headline": "one sentence verdict, at most 25 words",
   "risk": "none | low | medium | high | critical",
   "summary": "3-6 sentence executive summary for a release manager",
   "rootCauses": [{"cause": "likely root cause (e.g. dataset refresh, measure/DAX change, filter or RLS change, visual config edit, page/layout edit, broken navigation)", "confidence": "low | medium | high", "evidence": "short evidence", "resultRefs": [1, 2]}],
@@ -135,14 +152,21 @@ async function summarise(runId, digest, values) {
   const id = startRecord(runId, 'summary', config.ai.textModel);
   emit(runId, { stage: 'summary', status: 'running' });
   try {
-    const r = await chatJson({
-      model: config.ai.textModel,
-      maxTokens: 3000,
-      messages: [
+    const messages = [
         { role: 'system', content: SYSTEM },
-        { role: 'user', content: `Triage this validation run. Group related checks into findings, rank by severity, infer root causes, and mark checks that look like noise.\n\n${digest}\n\nEXTRACTED VALUES (B side, or A in single mode):\n${clip(values, 8000)}\n\nReply with ONLY JSON matching:\n${SUMMARY_SCHEMA}` },
-      ],
-    });
+        { role: 'user', content: `Triage this validation run for the Power BI team. First write "actionItems": the major differences they must look into, at most 10, most important first. Merge checks that share a cause (e.g. one changed measure that moves numbers on several pages is ONE item, citing all its checks). P1 = wrong or changed numbers, missing pages/visuals, model, relationship or security (RLS) changes, broken visuals; P2 = behaviour users notice (navigation, slicers, drill, drill-through); P3 = cosmetic or additive. Leave out noise and accepted items; use only facts present below, quoting exact before → after values. Then group related checks into findings, rank by severity, infer root causes, and mark checks that look like noise.\n\n${digest}\n\nEXTRACTED VALUES (B side, or A in single mode):\n${clip(values, 8000)}\n\nReply with ONLY one JSON object with exactly these top-level keys: actionItems, headline, risk, summary, rootCauses, findings, noise, nextSteps. Each key holds its own content (do not put the summary or items inside "headline"). Shape:\n${SUMMARY_SCHEMA}` },
+    ];
+    const r = await chatJson({ model: config.ai.textModel, maxTokens: 8000, messages });
+    // Some models squeeze everything into one field: retry once with a reminder.
+    const ok = (j) => j && Array.isArray(j.actionItems) && typeof j.summary === 'string' && String(j.headline || '').length < 400;
+    if (!ok(r.json)) {
+      logger.warn('AI summary had the wrong shape; asking again');
+      const again = await chatJson({
+        model: config.ai.textModel, maxTokens: 8000,
+        messages: [...messages, { role: 'assistant', content: JSON.stringify(r.json).slice(0, 4000) }, { role: 'user', content: 'That JSON has the wrong shape. Reply again with ONE JSON object whose top-level keys are exactly: actionItems (array of objects), headline (one short sentence), risk, summary (string), rootCauses (array), findings (array), noise (array), nextSteps (array). No other text.' }],
+      });
+      if (ok(again.json) || !ok(r.json)) Object.assign(r, again);
+    }
     finishRecord(id, { content: r.json, ms: r.ms, model: r.model });
     emit(runId, { stage: 'summary', status: 'done' });
   } catch (e) {
@@ -158,7 +182,7 @@ async function anomalies(runId, digest, values) {
   try {
     const r = await chatJson({
       model: config.ai.textModel,
-      maxTokens: 2500,
+      maxTokens: 5000,
       messages: [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: `Act as a data-quality reviewer. Inspect the values shown by each visual and flag anomalies: totals that do not reconcile with their breakdowns, percentages that do not add up, unexpected blanks/zeros/negatives, implausible magnitudes or dates, duplicated categories, and values that changed between A and B by an unusual amount. Only use numbers present below.\n\nVALUES BY PAGE:\n${values}\n\nRUN CONTEXT:\n${clip(digest, 9000)}\n\nReply with ONLY JSON matching:\n${ANOMALY_SCHEMA}` },

@@ -343,3 +343,5 @@ table.dt-vals td.add { background: #e6ffec; }
 .rb-view.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .rb-view img { width: 100%; height: 100%; display: block; cursor: pointer; user-select: none; }
 .rb-wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+table.act-items td { vertical-align: top; }
+table.act-items td.mono { max-width: 340px; overflow-wrap: anywhere; }

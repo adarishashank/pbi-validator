@@ -171,18 +171,69 @@ export async function executeRun(ctx) {
       done += 0.2;
     }
 
-    for (const pair of pairs) {
-      checkAbort();
-      const ref = { A: pair.a, B: pair.b };
-      const pageName = pair.a.name;
-      const frac = (x) => ctx.progress(0.07 + 0.9 * ((done + x) / totalUnits), `Page "${pageName}"`);
-      frac(0);
-      log('info', `── Page "${pageName}"${compare && pair.how === 'position' ? ` (B: "${pair.b.name}")` : ''}`);
-      await processPage({ ctx, cfg, sel, sides, S, both, ref, pageName, compare, tol, normalize, frac, checkAbort, counters });
-      done += 1;
+    // Workers: each has its own tab of A and B, so several pages are tested
+    // at once. Phase 1 checks every page's screenshot, layout and data; phase 2
+    // runs interactions until the time budget is used up.
+    const deadline = cfg.timing.budgetMinutes > 0 ? ctx.startedAt + cfg.timing.budgetMinutes * 60_000 - 45_000 : 0;
+    const want = Math.min(cfg.limits.parallelPages || ctx.parallelPages || 1, Math.max(1, pairs.length));
+    const lanes = [{ id: 1, sides, S, both }];
+    if (want > 1) {
+      ctx.progress(0.06, `Opening ${want - 1} more tab(s) for parallel pages`);
+      const extra = await Promise.all(Array.from({ length: want - 1 }, async (_, i) => {
+        try {
+          const ls = [];
+          // Tab labels: A2/B2, A3/B3… (logs only).
+          for (const s0 of sides) {
+            const page = await s0.context.newPage();
+            ls.push({ name: s0.name, rep: s0.rep, context: s0.context, report: new PbiReport(page, { url: s0.rep.url, side: `${s0.name}${i + 2}`, sel, cfg, log, signedIn: s0.report.signedIn }) });
+          }
+          await Promise.all(ls.map(async (x) => { await x.report.open(); await x.report.listPages(); }));
+          const LS = Object.fromEntries(ls.map((x) => [x.name, x]));
+          return { id: i + 2, sides: ls, S: LS, both: (fn) => Promise.all(ls.map((x) => fn(x))) };
+        } catch (e) {
+          log('warn', `Parallel tab ${i + 2} could not open (${e.message.split('\n')[0]}); continuing with fewer`);
+          return null;
+        }
+      }));
+      lanes.push(...extra.filter(Boolean));
     }
+    if (lanes.length > 1) log('info', `Testing ${lanes.length} pages at a time`);
+    if (deadline) log('info', `Time budget: ${cfg.timing.budgetMinutes} min (interactions stop at ${new Date(deadline).toISOString().slice(11, 16)} UTC)`);
 
-    counters.reloads = sides.reduce((n, s) => n + s.report.reloads, 0);
+    const runPhase = async (phase, from, to) => {
+      const queue = [...pairs];
+      let finished = 0;
+      await Promise.all(lanes.map(async (lane) => {
+        for (let pair = queue.shift(); pair; pair = queue.shift()) {
+          checkAbort();
+          const ref = { A: pair.a, B: pair.b };
+          // Each lane navigates its own tabs; page objects carry per-tab state.
+          for (const x of lane.sides) ref[x.name] = x.report.pages.find((p) => p.index === ref[x.name].index) || ref[x.name];
+          const pageName = pair.a.name;
+          if (phase === 'interactive' && deadline && Date.now() > deadline) {
+            await recordTimeSkip(ctx, pageName, { cfg });
+            finished += 1;
+            continue;
+          }
+          const frac = (x) => ctx.progress(from + (to - from) * ((finished + x) / Math.max(1, pairs.length)), `${phase === 'static' ? 'Checking' : 'Interacting with'} "${pageName}"`);
+          frac(0);
+          log('info', `── ${phase === 'static' ? 'Page' : 'Interactions on page'} "${pageName}"${compare && pair.how === 'position' ? ` (B: "${pair.b.name}")` : ''}${lanes.length > 1 ? ` [tab ${lane.id}]` : ''}`);
+          try {
+            await processPage({ ctx, cfg, sel, sides: lane.sides, S: lane.S, both: lane.both, ref, pageName, compare, tol, normalize, frac, checkAbort, counters, phase, deadline });
+          } catch (e) {
+            if (e instanceof CancelledError || e.code === 'AUTH_REQUIRED') throw e;
+            log('error', `Page "${pageName}" failed: ${e.message.split('\n')[0]}`);
+            await ctx.record({ page: pageName, scenario: 'health', target: `page-error-${phase}`, title: `Could not test "${pageName}"`, status: 'error', details: { error: e.message.split('\n').slice(0, 4).join('\n') } });
+          }
+          finished += 1;
+        }
+      }));
+    };
+    await runPhase('static', 0.07 + 0.02 * done, 0.4);
+    await runPhase('interactive', 0.4, 0.97);
+
+    counters.reloads = lanes.flatMap((l) => l.sides).reduce((n, s) => n + s.report.reloads, 0);
+    counters.parallelPages = lanes.length;
     ctx.progress(0.99, 'Finalising');
     for (const s of sides) {
       if (s.rep.statePath && ctx.saveState) {
@@ -199,6 +250,8 @@ export async function executeRun(ctx) {
 async function processPage(env) {
   const { ctx, cfg, sel, sides, S, both, ref, pageName, compare, tol, normalize, frac, checkAbort, counters } = env;
   const log = ctx.log;
+  const overBudget = () => !!env.deadline && Date.now() > env.deadline;
+  let skippedForTime = 0;
   const renderMs = {};
   await both(async (s) => {
     const t0 = Date.now();
@@ -224,7 +277,9 @@ async function processPage(env) {
   };
   await refresh();
 
+  const recordStatic = env.phase !== 'interactive';
   // Health -------------------------------------------------------------
+  if (recordStatic) {
   const errs = Object.fromEntries(sides.map((s) => [s.name, state.ex[s.name].visuals.filter((v) => v.error).map((v) => ({ visual: visualLabel(v), error: v.error, box: v.box }))]));
   const anyErr = Object.values(errs).some((e) => e.length);
   await ctx.record({
@@ -234,9 +289,10 @@ async function processPage(env) {
     images: anyErr ? Object.fromEntries(sides.filter((s) => errs[s.name].length).map((s) => [s.name.toLowerCase(), annotateBoxes(base[s.name], errs[s.name].map((e) => e.box))])) : {},
     details: { errors: errs, visualCount: Object.fromEntries(sides.map((s) => [s.name, state.ex[s.name].total])), renderMs },
   });
+  }
 
   // Page render --------------------------------------------------------
-  if (cfg.scenarios.pageRender) {
+  if (cfg.scenarios.pageRender && recordStatic) {
     await ctx.record(imageResult({
       page: pageName, scenario: 'page_render', target: 'page', title: `Page render · ${pageName}`,
       a: base.A, b: base.B, compare, cfg, details: { renderMs, canvasA: state.ex.A.canvas, canvasB: state.ex.B?.canvas },
@@ -244,7 +300,7 @@ async function processPage(env) {
   }
 
   // Structure ----------------------------------------------------------
-  if (cfg.scenarios.structure && compare) {
+  if (cfg.scenarios.structure && compare && recordStatic) {
     const issues = structuralDiff(state.match, cfg.thresholds);
     const inventory = state.match.pairs.map((p) => ({ visual: visualLabel(p.a), type: p.a.type, matchedBy: p.how, boxA: p.a.box, boxB: p.b.box }));
     await ctx.record({
@@ -260,7 +316,7 @@ async function processPage(env) {
   }
 
   // Per-visual ---------------------------------------------------------
-  if (cfg.scenarios.visuals) {
+  if (cfg.scenarios.visuals && recordStatic) {
     for (const p of state.match.pairs) {
       if (ignoredType(p.a)) continue;
       const a = cropBuffer(base.A, p.a.box), b = p.b ? cropBuffer(base.B, p.b.box) : null;
@@ -284,6 +340,8 @@ async function processPage(env) {
     }
   }
   frac(0.15);
+  if (env.phase === 'static') return;
+  if (overBudget()) { await recordTimeSkip(ctx, pageName, env); return; }
 
   // Interaction scenarios ---------------------------------------------
   const types = sel.types;
@@ -293,12 +351,17 @@ async function processPage(env) {
 
   const restoreAll = async (undo) => {
     const r = await Promise.all(sides.map((s) => s.report.restore(ref[s.name], base[s.name], undo ? () => undo(s) : null)));
+    // A page that never returns to its first screenshot (live data, animations,
+    // persisted filters) would otherwise be reloaded after every check.
+    r.forEach((x, i) => { if (x.drifted && x.shot) base[sides[i].name] = x.shot; });
     if (r.some((x) => x.reloaded)) await refresh();
   };
+
 
   /** Runs one interaction scenario with retries, error capture and state restore. */
   const scenario = async (meta, fn, { undo, restore = true } = {}) => {
     checkAbort();
+    if (overBudget()) { skippedForTime++; return; }
     counters.scenarios++;
     const t0 = Date.now();
     let attempt = 0;
@@ -436,6 +499,11 @@ async function processPage(env) {
       let labels = [];
       try {
         labels = (await S.A.report.slicerItems(p0.a)).labels;
+      } catch (e) {
+        log('warn', `Could not open slicer ${visualLabel(p0.a)}: ${e.message.split('\n')[0]}`);
+        await ctx.record({ page: pageName, scenario: 'slicer', target: p0.key, title: `${visualLabel(p0.a)}`, status: 'skipped', details: { note: `The slicer's list could not be opened (${e.message.split('\n')[0].slice(0, 120)}); its values were not tested` } });
+        await S.A.report.dismissOverlays();
+        continue;
       } finally {
         await S.A.report.page.keyboard.press('Escape').catch(() => {});
         await sleep(300);
@@ -667,6 +735,7 @@ async function processPage(env) {
       }, { restore: false });
     }
   }
+  if (skippedForTime) await recordTimeSkip(ctx, pageName, env, skippedForTime);
   frac(1);
   log('info', `Page "${pageName}" complete`);
 
@@ -696,6 +765,17 @@ async function processPage(env) {
     }
     return res;
   }
+}
+
+/** One "skipped" check per page whose interactions didn't fit in the run's time budget. */
+async function recordTimeSkip(ctx, pageName, env, count = null) {
+  const mins = env.cfg.timing.budgetMinutes;
+  await ctx.record({
+    page: pageName, scenario: 'budget', target: 'interactions',
+    title: count ? `${count} interaction check(s) not run: ${mins}-minute time budget reached` : `Interactions not tested: ${mins}-minute time budget reached`,
+    status: 'skipped',
+    details: { note: `The run is limited to ${mins} minutes (Advanced → Time budget). Screenshots, layout and data of this page were still checked. Raise the budget, test fewer pages, or run more pages in parallel to cover these interactions.` },
+  });
 }
 
 /**

@@ -19,7 +19,7 @@ export const STATUS_ORDER = ['fail', 'error', 'missing', 'diff', 'warn', 'accept
 export const STATUS_LABEL = { pass: 'Pass', diff: 'Diff', fail: 'Fail', missing: 'Missing', error: 'Error', warn: 'Warning', accepted: 'Accepted', skipped: 'Skipped' };
 export const SCENARIO_LABEL = {
   report_pages: 'Pages', health: 'Health', page_render: 'Page render', structure: 'Layout', visual: 'Visual',
-  button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', drill_through: 'Drill-through', model: 'Data model', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',
+  button: 'Button', slicer: 'Slicer', drill: 'Hierarchy drill', drill_through: 'Drill-through', model: 'Data model', budget: 'Time budget', matrix_expand: 'Matrix expand', cross_filter: 'Cross-filter', tooltip: 'Tooltip',
 };
 const PROBLEM = new Set(['fail', 'error', 'missing', 'diff', 'warn']);
 const RUN_STATUS_LABEL = { passed: 'Passed', failed: 'Failed', diffs: 'Differences found', error: 'Error', cancelled: 'Cancelled', running: 'Running', queued: 'Queued' };
@@ -107,6 +107,18 @@ export function runSheets(bundle) {
     },
   ];
   const ch = runChanges(run.id);
+  const actionItems = S?.actionItems?.length ? S.actionItems : (run.snapshot?.reports?.B ? ch?.report.top : null) || [];
+  if (actionItems.length) {
+    sheets.splice(1, 0, {
+      name: 'Action items',
+      columns: [{ key: 'priority', header: 'Priority', width: 9 }, { key: 'area', header: 'Area', width: 14 }, { key: 'page', header: 'Page', width: 24 },
+        { key: 'title', header: 'What to look into', width: 50, wrap: true }, { key: 'changed', header: 'What changed', width: 50, wrap: true },
+        { key: 'cause', header: 'Likely cause', width: 40, wrap: true }, { key: 'action', header: 'Action', width: 40, wrap: true }, { key: 'owner', header: 'Owner', width: 20 },
+        { key: 'refs', header: 'Checks', width: 14 }, { key: 'source', header: 'Ranked by', width: 10 }],
+      rows: actionItems.map((x) => ({ priority: x.priority, area: x.area, page: x.page || '', title: x.object ? `${x.title} (${x.object})` : x.title, changed: x.whatChanged || x.evidence || '',
+        cause: x.likelyCause || '', action: x.action || '', owner: x.owner || '', refs: (x.resultRefs || x.refs || []).map((n) => `#${n}`).join(' '), source: S?.actionItems?.length ? 'AI' : 'Rules' })),
+    });
+  }
   if (ch && run.snapshot?.reports?.B) {
     sheets.push({
       name: 'What changed',
@@ -339,8 +351,19 @@ export function reportHtml(bundle, { maxIssues = 40, maxPageShots = 24, includeI
     ${Object.entries(byScenario).map(([sc, m]) => `<tr><td><b>${esc(SCENARIO_LABEL[sc] || sc)}</b></td>${STATUS_ORDER.map((s) => `<td>${m[s] ? `<span class="pill s-${s}">${m[s]}</span>` : '<span class="muted">·</span>'}</td>`).join('')}<td>${Object.values(m).reduce((a, b) => a + b, 0)}</td></tr>`).join('')}
   </tbody></table>`;
 
-  // What changed (comparisons only).
+  // What changed (comparisons only), led by what the Power BI team should look into.
   const ch = reps.B ? runChanges(run.id) : null;
+  const items = S?.actionItems?.length ? S.actionItems : ch?.report.top || [];
+  if (items.length) {
+    h += `<h2>Action items for the Power BI team</h2><p class="muted small">${S?.actionItems?.length ? 'Prioritised by AI from the checks below; verify before acting.' : 'Ranked automatically: P1 numbers, missing content and model changes first.'}</p>
+      <table><thead><tr><th>Priority</th><th>What to look into</th><th>What changed</th><th>${S?.actionItems?.length ? 'Likely cause → action' : 'Who'}</th><th>Checks</th></tr></thead><tbody>
+      ${items.map((x) => `<tr><td><span class="pill ${x.priority === 'P1' ? 's-fail' : x.priority === 'P2' ? 's-warn' : 's-skipped'}">${esc(x.priority)}</span></td>
+        <td><b>${esc(x.title)}</b><div class="muted small">${esc([x.area, x.page, x.object].filter(Boolean).join(' · '))}</div>${x.impact ? `<div class="small">${esc(x.impact)}</div>` : ''}</td>
+        <td class="mono small">${esc(x.whatChanged || x.evidence || '')}</td>
+        <td class="small">${S?.actionItems?.length ? `${esc(x.likelyCause || '')}${x.action ? `<div>→ ${esc(x.action)}</div>` : ''}${x.owner ? `<div class="muted">${esc(x.owner)}</div>` : ''}` : esc(x.owner || '')}</td>
+        <td class="small">${(x.resultRefs || x.refs || []).slice(0, 8).map((n) => `#${n}`).join(' ')}</td></tr>`).join('')}
+      </tbody></table>`;
+  }
   if (ch) h += changesHtml(ch);
 
   // AI analysis.

@@ -1,5 +1,6 @@
 import { html, useState, useEffect, api, pct, STATUS_LABEL, SCENARIO_LABEL } from '../lib.js';
 import { Badge, Spinner } from '../ui.js';
+import { ActionItems } from './ai.js';
 
 // "What changed" for a comparison run: report → page → visual → value.
 // Level colours are one blue ramp (more change = darker) and always carry a
@@ -97,7 +98,7 @@ function ModelPanel({ m, onOpen }) {
   </div>`;
 }
 
-export function WhatChanged({ run, version, onOpen }) {
+export function WhatChanged({ run, version, onOpen, onOpenRef, ai }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [page, setPage] = useState(null);
@@ -110,6 +111,12 @@ export function WhatChanged({ run, version, onOpen }) {
   return html`<div class="stack">
     <div class="callout ${changed.length ? 'info' : 'ok'}"><div><b>${data.report.headline}</b>
       ${data.report.renamed.length > 0 && html`<div class="small">Renamed: ${data.report.renamed.map((x) => `${x.a} → ${x.b}`).join(', ')}</div>`}</div></div>
+    ${(() => {
+      const S = ai?.summary?.status === 'done' ? ai.summary.content : null;
+      return S?.actionItems?.length
+        ? html`<${ActionItems} items=${S.actionItems} fromAi model=${ai.summary.model} onOpenRef=${onOpenRef} />`
+        : html`<${ActionItems} items=${data.report.top} onOpenRef=${onOpenRef} />`;
+    })()}
     <div class="grid g4">
       <div class="panel kpi"><div class="l">Pages changed</div><div class="v">${t.pagesChanged}</div><div class="small muted">of ${data.pages.length} page${data.pages.length === 1 ? '' : 's'}</div></div>
       <div class="panel kpi"><div class="l">Visuals added / removed</div><div class="v">${t.visualsAdded} / ${t.visualsRemoved}</div><div class="small muted">${t.visualsMoved} moved or resized</div></div>
