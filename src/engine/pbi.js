@@ -18,8 +18,9 @@ export class ReportError extends Error {
  * through `this.frame` so reports embedded in a host page's iframe work too.
  */
 export class PbiReport {
-  constructor(page, { url, side, sel, cfg, log }) {
+  constructor(page, { url, side, sel, cfg, log, signedIn = null }) {
     this.page = page;
+    this.signedIn = signedIn; // true: a saved Power BI session was loaded; false: opened anonymously
     this.frame = page.mainFrame();
     this.url = url;
     this.side = side;
@@ -53,7 +54,10 @@ export class PbiReport {
     const deadline = Date.now() + loadTimeoutMs;
     while (Date.now() < deadline) {
       if (loginRe.test(this.page.url())) {
-        throw new ReportError('AUTH_REQUIRED', `Redirected to sign-in (${new URL(this.page.url()).host}). The auth profile session is missing or expired — sign in again from "Power BI sign-ins".`);
+        const host = new URL(this.page.url()).host;
+        throw new ReportError('AUTH_REQUIRED', this.signedIn === false
+          ? `Report ${this.side} needs a Microsoft sign-in, but its report link has no Power BI sign-in selected, so it was opened anonymously (redirected to ${host}). Edit the report link and choose a Power BI sign-in.`
+          : `Redirected to sign-in (${host}). The saved Power BI session has expired: sign in again from "Power BI sign-ins".`);
       }
       for (const f of this.page.frames()) {
         const n = await f.locator(this.sel.visualContainer).count().catch(() => 0);

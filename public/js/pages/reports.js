@@ -5,7 +5,7 @@ import { Topbar } from './common.js';
 function ReportForm({ report, profiles, onDone }) {
   const [f, setF] = useState({
     name: report?.name || '', url: report?.url || '', environment: report?.environment || '',
-    auth_profile_id: report?.auth_profile_id || null, tags: report?.tags || '', notes: report?.notes || '',
+    auth_profile_id: report ? report.auth_profile_id || null : (profiles.length === 1 ? profiles[0].id : null), tags: report?.tags || '', notes: report?.notes || '',
   });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = async () => {
@@ -54,6 +54,8 @@ function Discovery({ report, result }) {
   </${Modal}>`;
 }
 
+/** Secured app.powerbi.com links need a sign-in; publish-to-web (…/view?r=) links don't. */
+const needsSignIn = (url) => /app\.powerbi\.com|app\.fabric\.microsoft\.com/i.test(url || '') && !/\/view\?r=/i.test(url || '');
 const hasIds = (url) => /\/groups\/[\w-]+\/reports\/[0-9a-f-]{36}/i.test(url || '') || /reportEmbed.*reportId=/i.test(url || '');
 
 /** Uploads a data-model file (.pbit, model.bim, .tmdl or zipped TMDL folder) for a report link. */
@@ -127,7 +129,9 @@ export function Reports() {
             <td style="max-width:420px"><b>${r.name}</b><div class="small muted truncate" title=${r.url}>${r.url}</div>
               ${r.tags && html`<div class="row" style="gap:4px;margin-top:4px">${r.tags.split(',').map((t) => t.trim()).filter(Boolean).map((t) => html`<span class="tag">${t}</span>`)}</div>`}</td>
             <td>${r.environment ? html`<span class="tag">${r.environment}</span>` : html`<span class="muted">—</span>`}</td>
-            <td>${r.auth_profile_name ? html`<div class="row" style="gap:6px">${r.auth_profile_name}<${Badge} s=${r.auth_profile_status} /></div>` : html`<span class="muted small">Anonymous</span>`}</td>
+            <td>${r.auth_profile_name ? html`<div class="row" style="gap:6px">${r.auth_profile_name}<${Badge} s=${r.auth_profile_status} /></div>`
+              : needsSignIn(r.url) ? html`<span class="small" style="color:var(--fail)" title="This link opens a secured report: edit it and choose a Power BI sign-in">⚠ No sign-in selected</span>`
+              : html`<span class="muted small">Anonymous</span>`}</td>
             <td style="max-width:220px"><${ModelCell} r=${r} reload=${reload} /></td>
             <td>${!d ? html`<span class="muted small">Never</span>` : d.ok
               ? html`<span class="row" style="gap:6px"><${Badge} s="pass" label="OK" /><span class="small muted">${d.pages.length} pages · ${fmtAgo(d.at)}</span></span>`

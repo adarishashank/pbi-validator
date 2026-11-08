@@ -93,7 +93,7 @@ export async function executeRun(ctx) {
       const rep = ctx.reports[name];
       const context = await newReportContext(browser, cfg, rep.statePath);
       const page = await context.newPage();
-      sides.push({ name, rep, context, report: new PbiReport(page, { url: rep.url, side: name, sel, cfg, log }) });
+      sides.push({ name, rep, context, report: new PbiReport(page, { url: rep.url, side: name, sel, cfg, log, signedIn: !!(rep.statePath && fs.existsSync(rep.statePath)) }) });
     }
     const S = Object.fromEntries(sides.map((s) => [s.name, s]));
     const both = (fn) => Promise.all(sides.map((s) => fn(s)));

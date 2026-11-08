@@ -263,7 +263,7 @@ export function RunDetail({ id }) {
           ${reps.B && html`<span>⇄</span><span class="side-pill" title=${reps.B?.url}><b>B</b>${reps.B.name}${reps.B.environment ? ` · ${reps.B.environment}` : ''}</span>`}
           <span class="spacer"></span>${run.summary?.loadMs && html`<span class="small muted">Load: ${Object.entries(run.summary.loadMs).map(([k, v]) => `${k} ${fmtDur(v)}`).join(' · ')}</span>`}</div>
         ${live && html`<div><div class="row small" style="margin-bottom:6px"><${Spinner} /><b>${run.phase || 'Starting'}</b><span class="spacer"></span>${Math.round((run.progress || 0) * 100)}%</div><${Progress} value=${run.progress} /></div>`}
-        ${run.error && html`<div class="callout err">✖ <div>${run.error}${/sign-in|expired/i.test(run.error) ? html` — <a href="#/profiles">open Power BI sign-ins</a>` : ''}</div></div>`}
+        ${run.error && html`<div class="callout err">✖ <div>${run.error}${/no Power BI sign-in selected/i.test(run.error) ? html` <a href="#/reports">Open Report links</a>` : /sign-in|expired/i.test(run.error) ? html` <a href="#/profiles">Open Power BI sign-ins</a>` : ''}</div></div>`}
         <div class="row">
           <span class="chip ${!f.status && !f.problems ? 'on' : ''}" onClick=${() => setF({ ...f, status: '', problems: false })}>All <span class="n">${results.length}</span></span>
           <span class="chip ${f.problems && !f.status ? 'on' : ''}" onClick=${() => setF({ ...f, status: '', problems: true })}>Problems <span class="n">${results.filter((r) => PROBLEM.has(r.status)).length}</span></span>
