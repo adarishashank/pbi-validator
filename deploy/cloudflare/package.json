@@ -1,0 +1,17 @@
+{
+  "name": "pbireporttest-cloudflare",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker + Container that hosts PBI Report Test at *.workers.dev",
+  "scripts": {
+    "deploy": "./deploy.sh",
+    "dev": "wrangler dev",
+    "logs": "wrangler tail"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "wrangler": "^4.158.0"
+  }
+}

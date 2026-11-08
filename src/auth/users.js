@@ -22,7 +22,8 @@ export const tempPasswordExpired = (u) => Boolean(u?.must_change_password && u.t
 
 export function publicUser(u) {
   if (!u) return null;
-  const { password_hash: hash, ...rest } = u;
+  // eslint-disable-next-line no-unused-vars
+  const { password_hash: hash, ms_oid: _oid, ms_tid: _tid, ...rest } = u;
   return {
     ...rest, has_password: Boolean(hash), disabled: Boolean(u.disabled), must_change_password: Boolean(u.must_change_password),
     temp_password_expired: tempPasswordExpired(u),

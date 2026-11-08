@@ -1,0 +1,17 @@
+# Keep secrets, data and local tooling out of image builds.
+.env
+.env.*
+!.env.example
+data/
+data-backup-*/
+node_modules/
+deploy/**/node_modules/
+deploy/**/.wrangler/
+deploy/**/.dev.vars
+deploy/**/.r2-credentials
+deploy/**/.api-token
+deploy/oracle/data/
+deploy/oracle/backups/
+.git/
+*.log
+.DS_Store

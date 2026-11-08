@@ -24,7 +24,14 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 export const config = {
   version: JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version,
   host: process.env.HOST || '127.0.0.1',
-  trustProxy: process.env.TRUST_PROXY || 'loopback',
+  // 'loopback' (default), a list like 'loopback, uniquelocal', a hop count, or
+  // 'true' when only a trusted proxy can reach the app (Cloudflare Worker).
+  trustProxy: (() => {
+    const v = (process.env.TRUST_PROXY || 'loopback').trim();
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return /^\d+$/.test(v) ? Number(v) : v;
+  })(),
   port: int(process.env.PORT, 4400),
   dataDir: DATA_DIR,
   dbPath: path.join(DATA_DIR, 'pbi-validator.db'),

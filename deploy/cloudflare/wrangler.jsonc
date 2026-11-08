@@ -1,0 +1,36 @@
+// PBI Report Test on Cloudflare (Workers + Containers + R2).
+// Deploy with ./deploy.sh (it creates the bucket and secrets, then runs `wrangler deploy`).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pbireporttest",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+
+  "containers": [
+    {
+      "class_name": "PbiApp",
+      "image": "./Dockerfile",
+      "image_build_context": "../..",
+      // 1/2 vCPU, 4 GiB RAM, 8 GB disk. Use "standard-2" (1 vCPU, 6 GiB) for faster runs.
+      "instance_type": "standard-1",
+      // One app instance: it owns the database.
+      "max_instances": 1,
+      // Let a deploy wait for a running validation to finish (seconds).
+      "rollout_active_grace_period": 900
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "APP", "class_name": "PbiApp" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PbiApp"] }],
+
+  // Non-secret settings (secrets are set by deploy.sh with `wrangler secret put`).
+  "vars": {
+    "R2_BUCKET": "pbireporttest-data",
+    "SLEEP_AFTER": "30m",
+    "SYNC_INTERVAL_SECONDS": "30",
+    "RUN_RETENTION_DAYS": "30",
+    "MAX_PARALLEL_RUNS": "1",
+    "LOG_LEVEL": "info"
+  }
+}

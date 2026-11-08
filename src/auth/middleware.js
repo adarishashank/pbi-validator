@@ -21,7 +21,8 @@ const tokenEquals = (a, b) => {
 };
 export const isApiToken = (t) => Boolean(config.apiToken) && tokenEquals(t, config.apiToken);
 
-export const requestOrigin = (req) => `${req.protocol}://${req.get('host')}`;
+// req.host (Express 5) includes the port and honours X-Forwarded-Host only from trusted proxies.
+export const requestOrigin = (req) => `${req.protocol}://${req.host}`;
 export const publicOrigin = (req) => authSettings().publicUrl || requestOrigin(req);
 
 /** A request made on this machine directly (not through a tunnel or proxy). */

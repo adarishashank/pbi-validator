@@ -95,6 +95,7 @@ The validator needs a real browser, disk storage and a sign-in window, so it run
 
 | Option | Command | Result |
 |---|---|---|
+| **Cloudflare (workers.dev)** | [`deploy/cloudflare/README.md`](deploy/cloudflare/README.md): `./deploy/cloudflare/deploy.sh` | `https://pbireporttest.<you>.workers.dev`; Workers Paid ($5/month) + usage; sleeps when idle |
 | **Free cloud server (recommended)** | [`deploy/oracle/README.md`](deploy/oracle/README.md): Oracle Cloud Always Free + one-command `install.sh` | `https://pbireporttest.duckdns.org`, always on, HTTPS, nightly backups |
 | Instant link (testing) | `./scripts/cloudflare/quick-tunnel.sh` | `https://<random>.trycloudflare.com`; changes on every start; requires `API_TOKEN` |
 | Permanent, on your domain | `./scripts/cloudflare/setup-named-tunnel.sh pbi.example.com` then `cloudflared tunnel run pbi-validator` | `https://pbi.example.com`; needs the domain's DNS on Cloudflare |
