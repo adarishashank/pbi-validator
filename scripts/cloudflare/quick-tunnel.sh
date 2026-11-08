@@ -17,5 +17,5 @@ if [ -z "${API_TOKEN:-}" ]; then
 fi
 curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null || { echo "The validator is not running on port ${PORT} (npm start)."; exit 1; }
 echo "Starting Cloudflare quick tunnel → http://127.0.0.1:${PORT}"
-echo "Open the https://…trycloudflare.com URL printed below and enter your API_TOKEN."
+echo "Open the https://…trycloudflare.com URL printed below and sign in with your account."
 exec "$CF" tunnel --no-autoupdate --url "http://127.0.0.1:${PORT}"
