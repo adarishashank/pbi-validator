@@ -110,6 +110,7 @@ table.t tr.click:hover td { background: #f8fafc; }
 .b-running { color: var(--running); background: var(--running-bg); }
 .b-accepted { color: #0369a1; background: #e0f2fe; }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 6px; background: #eef1f5; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.ok-text { color: var(--pass); font-weight: 600; } .err-text { color: var(--fail); }
 .chip { display: inline-flex; gap: 6px; align-items: center; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-weight: 600; font-size: 12.5px; cursor: pointer; }
 .chip.on { outline: 2px solid var(--accent); outline-offset: -1px; }
 .chip .n { font-variant-numeric: tabular-nums; }

@@ -68,6 +68,9 @@ test('a slicer that opens on different values is reported once; the page is comp
   const top = ch.report.top[0];
   assert.deepEqual([top.priority, top.area, top.title], ['P1', 'Defaults', 'Slicer "Region" opens on All in A but South in B']);
   assert.deepEqual(ch.pages.find((p) => p.name === 'Overview').selections.map((x) => [x.slicer, x.b]), [['Region', ['South']]]);
+  // Each page lists the slicer values both sides were compared on.
+  const region = ch.pages.find((p) => p.name === 'Overview').filters.find((f) => f.slicer === 'Region');
+  assert.deepEqual([region.a, region.b, region.same, region.how], ['All', 'All', true, 'aligned']);
 });
 
 test('with alignment off, the default selection shows up as value differences', { timeout: 300_000 }, async () => {
@@ -89,6 +92,7 @@ test('fixed parameters are applied to both reports; a value one report lacks fai
   assert.ok(c.details.sample.includes('60'), JSON.stringify(c.details.sample));
   const pr = results.find((r) => r.scenario === 'page_render');
   assert.deepEqual(pr.details.selections.map((x) => [x.slicer, x.why, x.values, x.changed.sort()]), [['Region', 'parameter', ['East'], ['A', 'B']]]);
+  assert.deepEqual(pr.details.filters.filter((f) => f.slicer === 'Region').map((f) => [f.a, f.b, f.same, f.how]), [['East', 'East', true, 'parameter']]);
 
   const bad = await run('bad parameter', `${base}?v=a`, `${base}?v=a`, { scenarios: { slicers: false }, parameters: [{ slicer: '/^reg/i', values: ['Mars'] }] });
   const f = bad.results.find((r) => r.scenario === 'selections');
@@ -114,5 +118,7 @@ test('when B cannot be set, the finding says so instead of claiming the page was
   const sel = results.find((r) => r.scenario === 'selections');
   assert.ok(sel, dump(results));
   assert.equal(sel.details.applied, false);
+  const biz = results.find((r) => r.scenario === 'page_render').details.filters.find((f) => f.slicer === 'Business');
+  assert.deepEqual([biz.a, biz.b, biz.same, biz.how], ['XX', 'AUS', false, 'not aligned']);
   assert.match(sel.details.note, /XX not available in B: the rest of this page was compared with different selections/);
 });

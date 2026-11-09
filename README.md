@@ -68,6 +68,8 @@ A slicer that opens on different values (North in A, South in B) makes every vis
 2. If they differ, record **one** `selections` finding with pictures of both slicers as they opened (ranked P1 *Defaults* in the action items), then set B to A's values.
 3. Compare the page, visuals and data on that same selection. After a reload or a slicer test, the aligned values are put back, so interactions start from the same state too.
 
+Every page records the values it was **compared on** (each slicer's value in A and in B, and whether B was set to A or a fixed parameter was used). *What changed* shows them at the top of each page, the PDF has a **Page by page** section (filters, then each difference as `Row: A → B`), and the Excel sheets *What changed* and *Value changes* have a *Compared on* column.
+
 **Fixed parameters** (suite → Scenarios) are set on both reports first: one per line, `Slicer = value1, value2 @ Page` (page optional; slicer and page can be `/regex/`; empty values clear the slicer). In JSON: `"parameters": [{ "slicer": "Region", "values": ["South"], "page": "" }]`. Date/range slicers are not set automatically.
 
 ## Speed: time budget and parallel pages

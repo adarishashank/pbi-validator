@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { chromium } from 'playwright';
-import { PbiReport, ReportError } from './pbi.js';
+import { PbiReport, ReportError, dropdownText } from './pbi.js';
 import { resolveSelectors } from './selectors.js';
 import { anyMatch } from './options.js';
 import { runModelChecks } from '../model/checks.js';
@@ -392,6 +392,37 @@ async function alignSelections(env) {
   return applied;
 }
 
+/**
+ * The slicer values each side was compared on (after alignment and fixed
+ * parameters), read from what the slicers show: no clicks.
+ */
+function pageFilters({ sel, compare, state, applied }) {
+  const text = (v) => (v.lines || []).map((l) => l.replace(/\s+/g, ' ').trim()).filter((l) => l && l.toLowerCase() !== (v.title || '').trim().toLowerCase()).join(' ').slice(0, 120) || '(nothing shown)';
+  const read = (side, p) => {
+    const v = side === 'A' ? p.a : p.b;
+    if (!v) return null;
+    const known = state.selected?.get(p.key)?.[side];
+    if (known) return showSel(known);
+    if (v.slicer?.hasRange) return text(v);
+    if (v.slicer?.hasDropdown) { const d = dropdownText(v); return d ? showSel(d) : text(v); }
+    const items = v.slicer?.items || [];
+    if (!items.length) return text(v);
+    if (items.some((i) => i.checked && /^select all$/i.test(i.label))) return 'All';
+    return showSel(items.filter((i) => i.checked && i.label && !/^select all$/i.test(i.label)).map((i) => i.label));
+  };
+  const out = [];
+  for (const p of state.match?.pairs || []) {
+    if (!isSlicerVisual(sel, p.a)) continue;
+    const slicer = p.a.title || visualLabel(p.a);
+    if (out.some((f) => f.slicer === slicer)) continue;
+    const a = read('A', p);
+    const b = compare ? (p.b ? read('B', p) : null) : undefined;
+    const how = applied.find((x) => x.slicer === slicer);
+    out.push({ slicer, a, ...(compare ? { b, same: a === b } : {}), how: how ? (how.why === 'aligned' ? (how.changed.includes('B') ? 'aligned' : 'not aligned') : 'parameter') : '' });
+  }
+  return out.slice(0, 40);
+}
+
 async function processPage(env) {
   const { ctx, cfg, sel, sides, S, both, ref, pageName, compare, tol, normalize, frac, checkAbort, counters } = env;
   const log = ctx.log;
@@ -425,6 +456,7 @@ async function processPage(env) {
   const recordStatic = env.phase !== 'interactive';
   for (const s of sides) s.report.afterReload = null;
   state.selections = await alignSelections({ ...env, base, state, refresh, record: recordStatic, ignoredTitle });
+  state.filters = pageFilters({ sel, compare, state, applied: state.selections });
   // Health -------------------------------------------------------------
   if (recordStatic) {
   const errs = Object.fromEntries(sides.map((s) => [s.name, state.ex[s.name].visuals.filter((v) => v.error).map((v) => ({ visual: visualLabel(v), error: v.error, box: v.box }))]));
@@ -442,7 +474,7 @@ async function processPage(env) {
   if (cfg.scenarios.pageRender && recordStatic) {
     await ctx.record(imageResult({
       page: pageName, scenario: 'page_render', target: 'page', title: `Page render · ${pageName}`,
-      a: base.A, b: base.B, compare, cfg, details: { renderMs, canvasA: state.ex.A.canvas, canvasB: state.ex.B?.canvas, ...(state.selections.length ? { selections: state.selections } : {}) },
+      a: base.A, b: base.B, compare, cfg, details: { renderMs, canvasA: state.ex.A.canvas, canvasB: state.ex.B?.canvas, filters: state.filters, ...(state.selections.length ? { selections: state.selections } : {}) },
     }));
   }
 

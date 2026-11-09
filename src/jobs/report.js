@@ -7,7 +7,7 @@ import { runDir } from './queue.js';
 import { describe } from './export.js';
 import { createLogger } from '../logger.js';
 import { config } from '../config.js';
-import { runChanges } from './changes.js';
+import { runChanges, changeText } from './changes.js';
 
 const logger = createLogger('report');
 
@@ -125,7 +125,8 @@ export function runSheets(bundle) {
       columns: [{ key: 'page', header: 'Page', width: 28 }, { key: 'state', header: 'Page status', width: 14 }, { key: 'level', header: 'Change level', width: 13 },
         { key: 'problems', header: 'Checks needing attention', width: 14 }, { key: 'accepted', header: 'Accepted', width: 10 },
         { key: 'layout', header: 'Layout changes', width: 50, wrap: true }, { key: 'values', header: 'Values changed', width: 12 },
-        { key: 'interactions', header: 'Interactions that differ', width: 60, wrap: true }, { key: 'pixel', header: 'Page pixels different (%)', width: 14 }],
+        { key: 'interactions', header: 'Interactions that differ', width: 60, wrap: true }, { key: 'pixel', header: 'Page pixels different (%)', width: 14 },
+        { key: 'filters', header: 'Compared on (slicer: A | B)', width: 50, wrap: true }],
       rows: ch.pages.map((p) => ({
         page: p.renamedTo ? `${p.name} → ${p.renamedTo}` : p.name, state: PAGE_STATE[p.state], level: LEVEL_LABEL[p.level],
         problems: p.problems, accepted: p.accepted,
@@ -133,6 +134,7 @@ export function runSheets(bundle) {
         values: p.valuesChanged,
         interactions: p.interactions.map((i) => `${i.title}: ${i.summary}`).join('\n'),
         pixel: p.pixel == null ? null : +(p.pixel * 100).toFixed(3),
+        filters: (p.filters || []).map((f) => `${f.slicer}: ${filterPair(f)}`).join('\n'),
       })),
     });
     if (ch.report.model?.changes.length) {
@@ -150,12 +152,17 @@ export function runSheets(bundle) {
         })),
       });
     }
-    const valueRows = ch.pages.flatMap((p) => p.values.flatMap((v) => v.changes.map((c) => ({ page: p.name, visual: v.visual, change: OP_LABEL[c.op] || c.op, a: c.a ?? '', b: c.b ?? '', status: STATUS_LABEL[v.status] || v.status }))));
+    const valueRows = ch.pages.flatMap((p) => p.values.flatMap((v) => v.changes.map((c) => ({
+      page: p.name, visual: v.visual, change: OP_LABEL[c.op] || c.op, row: c.key || '', what: changeText(c, 60), a: c.a ?? '', b: c.b ?? '', status: STATUS_LABEL[v.status] || v.status,
+      filters: (p.filters || []).map((f) => `${f.slicer} = ${f.a ?? '—'}`).join('; '),
+    }))));
     if (valueRows.length) {
       sheets.push({
         name: 'Value changes',
         columns: [{ key: 'page', header: 'Page', width: 24 }, { key: 'visual', header: 'Visual', width: 40, wrap: true }, { key: 'change', header: 'Change', width: 10 },
-          { key: 'a', header: 'A (before)', width: 40, wrap: true }, { key: 'b', header: 'B (after)', width: 40, wrap: true }, { key: 'status', header: 'Status', width: 10 }],
+          { key: 'row', header: 'Row / item', width: 34, wrap: true }, { key: 'what', header: 'What changed (A → B)', width: 44, wrap: true },
+          { key: 'a', header: 'A (before)', width: 40, wrap: true }, { key: 'b', header: 'B (after)', width: 40, wrap: true }, { key: 'status', header: 'Status', width: 10 },
+          { key: 'filters', header: 'Compared on', width: 40, wrap: true }],
         rows: valueRows,
       });
     }
@@ -210,6 +217,8 @@ body { margin: 0; font: 10.5px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica,
 h1, h2, h3, h4 { margin: 0; line-height: 1.25; }
 h2 { font-size: 15px; margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #111827; break-after: avoid; }
 h3 { font-size: 12px; margin: 14px 0 6px; break-after: avoid; }
+h4 { font-size: 11px; margin: 10px 0 4px; break-after: avoid; }
+.pg { break-inside: avoid-page; margin-bottom: 8px; }
 p { margin: 0 0 8px; }
 .muted { color: #5f6b7a; } .small { font-size: 9px; } .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 9px; }
 .cover { background: #111827; color: #fff; border-radius: 10px; padding: 18px 20px; display: flex; gap: 16px; align-items: center; }
@@ -267,6 +276,34 @@ function shotsFor(r, dir, names) {
   return out.slice(0, 2).map(([cap, f]) => [cap, path.basename(f)]);
 }
 
+const filterPair = (f) => (f.b === undefined ? (f.a ?? '—') : f.same ? `${f.a} (both)` : `${f.a ?? '(no slicer)'} | ${f.b ?? '(no slicer)'}${f.how === 'aligned' ? ' → B set to A' : ''}`);
+
+/** Each page: the slicer values both sides were compared on, then what differs. */
+function pageByPageHtml(ch) {
+  const pages = ch.pages.filter((p) => p.state !== 'added');
+  if (!pages.length) return '';
+  let h = '<h3>Page by page</h3><p class="muted small">Each page was compared with the slicer values shown under it. A slicer that opened on different values was set to A\'s values in B first, so the differences listed come from the data, not the filters.</p>';
+  for (const p of pages) {
+    const fl = p.filters || [];
+    const differ = fl.filter((f) => f.b !== undefined && !f.same);
+    h += `<div class="pg"><h4>${esc(p.name)} <span class="lvl lvl-${p.level}">${p.state === 'removed' ? 'Removed' : LEVEL_LABEL[p.level]}</span></h4>`;
+    if (fl.length) {
+      h += differ.length
+        ? `<table class="small"><thead><tr><th>Slicer</th><th>A</th><th>B</th><th></th></tr></thead><tbody>${fl.map((f) => `<tr><td>${esc(f.slicer)}</td><td>${esc(f.a ?? '(no slicer)')}</td><td>${esc(f.b ?? '(no slicer)')}</td><td>${f.same ? 'same' : f.how === 'aligned' ? 'B set to A before comparing' : f.how === 'not aligned' ? '<b>could not be aligned</b>' : '<b>differs</b>'}</td></tr>`).join('')}</tbody></table>`
+        : `<p class="small"><b>Compared on</b> (same on both sides): ${fl.map((f) => `${esc(f.slicer)} = <b>${esc(f.a ?? '—')}</b>${f.how === 'aligned' ? ' (B set to A)' : f.how === 'parameter' ? ' (fixed)' : ''}`).join(' · ')}</p>`;
+    }
+    const items = [];
+    for (const v of p.values) for (const c of v.changes.slice(0, 12)) items.push(`<tr><td>${esc(v.visual)}</td><td class="mono">${esc(changeText(c, 40))}</td></tr>`);
+    for (const v of p.visualsChanged) if (v.missingIn) items.push(`<tr><td>${esc(v.title)}</td><td>${v.missingIn === 'B' ? 'Missing in B' : 'New in B'}</td></tr>`);
+    for (const l of p.layout) if (!['added', 'removed'].includes(l.change)) items.push(`<tr><td>${esc(l.visual)}</td><td>${esc(l.change)}</td></tr>`);
+    for (const i of p.interactions) if (i.status !== 'accepted') items.push(`<tr><td>${esc(i.title)}</td><td>${esc(i.summary)}</td></tr>`);
+    h += items.length ? `<table><thead><tr><th style="width:38%">Visual</th><th>Difference (A → B)</th></tr></thead><tbody>${items.slice(0, 40).join('')}</tbody></table>${items.length > 40 ? `<p class="muted small">${items.length - 40} more in the Excel export.</p>` : ''}`
+      : '<p class="small muted">No differences on this page.</p>';
+    h += '</div>';
+  }
+  return h;
+}
+
 /** "What changed" section: report-level headline, page heatmap, value changes. */
 function changesHtml(ch) {
   const t = ch.report.totals;
@@ -306,12 +343,7 @@ function changesHtml(ch) {
       }
     }
   }
-  const vals = ch.pages.flatMap((p) => p.values.flatMap((v) => v.changes.map((c) => ({ page: p.name, visual: v.visual, ...c }))));
-  if (vals.length) {
-    h += `<h3>Value changes (${vals.length})</h3><table><thead><tr><th>Page</th><th>Visual</th><th>Change</th><th>A (before)</th><th>B (after)</th></tr></thead><tbody>
-      ${vals.slice(0, 60).map((v) => `<tr><td>${esc(v.page)}</td><td>${esc(v.visual)}</td><td>${OP_LABEL[v.op] || esc(v.op)}</td><td class="mono">${esc(v.a ?? '')}</td><td class="mono">${esc(v.b ?? '')}</td></tr>`).join('')}
-    </tbody></table>${vals.length > 60 ? `<p class="muted small">${vals.length - 60} more in the Excel export.</p>` : ''}`;
-  }
+  h += pageByPageHtml(ch);
   return h;
 }
 

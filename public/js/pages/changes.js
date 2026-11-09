@@ -25,10 +25,33 @@ function PageTile({ p, on, onClick }) {
 }
 
 function ValueTable({ changes }) {
-  return html`<table class="t dt-vals"><thead><tr><th>Change</th><th>A (before)</th><th>B (after)</th></tr></thead><tbody>
-    ${changes.slice(0, 50).map((c) => html`<tr><td class="small">${OP[c.op] || c.op}</td><td class="mono ${c.op !== 'add' ? 'del' : ''}">${c.a ?? ''}</td><td class="mono ${c.op !== 'del' ? 'add' : ''}">${c.b ?? ''}</td></tr>`)}
-    ${changes.length > 50 && html`<tr><td colspan="3" class="small muted">${changes.length - 50} more: open the check for all of them</td></tr>`}
+  const keyed = changes.some((c) => c.key);
+  return html`<table class="t dt-vals"><thead><tr><th>Change</th>${keyed && html`<th>Row</th>`}<th>A (before)</th><th>B (after)</th></tr></thead><tbody>
+    ${changes.slice(0, 50).map((c) => {
+      const cells = c.op === 'chg' && c.cells ? c.cells : null;
+      return html`<tr><td class="small">${OP[c.op] || c.op}</td>${keyed && html`<td class="small">${c.key || ''}</td>`}
+        <td class="mono ${c.op !== 'add' ? 'del' : ''}">${cells ? cells.map((x) => x.a).join(', ') : c.a ?? ''}</td>
+        <td class="mono ${c.op !== 'del' ? 'add' : ''}">${cells ? cells.map((x) => x.b).join(', ') : c.b ?? ''}</td></tr>`;
+    })}
+    ${changes.length > 50 && html`<tr><td colspan="4" class="small muted">${changes.length - 50} more: open the check for all of them</td></tr>`}
   </tbody></table>`;
+}
+
+/** The slicer values both sides of this page were compared on. */
+function FiltersPanel({ p }) {
+  const fl = p.filters || [];
+  if (!fl.length) return null;
+  const compare = fl.some((f) => f.b !== undefined);
+  const differ = fl.filter((f) => compare && !f.same);
+  const note = (f) => (f.same ? html`<span class="ok-text">✓ same</span>` : f.how === 'aligned' ? html`<span>B set to A before comparing</span>`
+    : f.how === 'not aligned' ? html`<b class="err-text">could not be aligned</b>` : html`<b class="err-text">differs</b>`);
+  return html`<div class="panel panel-b"><h3>Compared on</h3>
+    ${differ.length === 0 ? html`<div class="row wrap" style="gap:6px">${fl.map((f) => html`<span class="tag">${f.slicer} = <b>${f.a ?? '—'}</b>${f.how === 'aligned' ? ' (B set to A)' : f.how === 'parameter' ? ' (fixed)' : ''}</span>`)}</div>
+      <div class="small muted" style="margin-top:6px">${compare ? 'Both reports showed these values, so the differences below come from the data, not the filters.' : 'The values the page showed.'}</div>`
+    : html`<table class="t"><thead><tr><th>Slicer</th><th>A</th><th>B</th><th></th></tr></thead><tbody>
+      ${fl.map((f) => html`<tr><td><b>${f.slicer}</b></td><td>${f.a ?? '(no slicer)'}</td><td>${f.b ?? '(no slicer)'}</td><td class="small">${note(f)}</td></tr>`)}</tbody></table>`}
+    ${fl.some((f) => f.fromText) && html`<div class="small muted" style="margin-top:4px">Read from the slicers' text (this run is older than the filter record).</div>`}
+  </div>`;
 }
 
 const showSel = (l) => (Array.isArray(l) ? (l.length ? l.join(', ') : 'All') : '—');
@@ -42,6 +65,7 @@ function PageDetail({ p, onOpen }) {
   const list = [...visuals.values()];
   return html`<div class="stack" style="gap:12px">
     ${p.state === 'removed' && html`<div class="callout err">This page exists only in A: it was removed or hidden in B.</div>`}
+    <${FiltersPanel} p=${p} />
     ${(p.selections || []).length > 0 && html`<div class="panel panel-b"><h3>Slicers that open on different values</h3>
       <table class="t"><thead><tr><th>Slicer</th><th>A</th><th>B</th><th>Compared on</th></tr></thead><tbody>
       ${p.selections.map((x) => html`<tr style="cursor:pointer" onClick=${() => onOpen?.(x.resultId)}><td><b>${x.slicer}</b></td><td>${showSel(x.a)}</td><td>${showSel(x.b)}</td>

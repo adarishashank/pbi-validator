@@ -268,8 +268,9 @@ At the top, **Action items for the Power BI team** lists what to look into first
 
 Click a page tile to open that page (Figure 14):
 
+- **Compared on**: the slicer values both reports showed when this page was compared, for example Region = North · Year = 2026. "(B set to A)" means B opened on other values and was aligned first; a table with **differs** means the two sides could not be put on the same values, so read the differences below with care.
 - **Layout**: visuals added, removed, moved, resized or retitled.
-- **Visuals**: every visual that looks or reads differently. Click its name to see each changed value, **A (before)** in red and **B (after)** in green. "No data change" means only the picture differs.
+- **Visuals**: every visual that looks or reads differently. Click its name to see each changed value: the **Row** it belongs to (for example JAN · North), **A (before)** in red and **B (after)** in green. Rows that are the same in both are left out. "No data change" means only the picture differs.
 - **Slicers that open on different values**: the slicer, what A and B show when the page opens, and the values both were set to before comparing.
 - **Interactions that behave differently**: for example a button that goes to another page, or a drill that shows other numbers at level 2.
 - **Open check** opens the full evidence: screenshots, data and the AI explanation. Click **Report** in the breadcrumb to go back to all pages.
@@ -277,7 +278,7 @@ Click a page tile to open that page (Figure 14):
 ![One page: the changed value of a card, and the interactions that differ](images/f8-what-changed-page.jpg)
 *Figure 14. One page: the changed value of a card, and the interactions that differ*
 
-> **Tip:** The PDF report has the same summary near the top, and the Excel export adds the sheets **What changed**, **Value changes** and **Model changes**.
+> **Tip:** The PDF report has the same summary near the top and a **Page by page** section: each page with the filters it was compared on and every difference as Row: A → B. The Excel export adds the sheets **What changed**, **Value changes** and **Model changes**, with a **Compared on** column.
 
 ## 4. Editor guide
 

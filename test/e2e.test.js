@@ -173,7 +173,8 @@ test('exports: PDF report and Excel workbook are built from a real run', { timeo
   assert.match(htmlDoc, /<h2>Action items for the Power BI team<\/h2>/);
   assert.match(htmlDoc, /lvl lvl-high">Removed/, 'Archive page shown as removed');
   assert.match(htmlDoc, /<h3>Data model<\/h3>/);
-  assert.match(htmlDoc, /Value changes \(\d+\)/);
+  assert.match(htmlDoc, /<h3>Page by page<\/h3>/);
+  assert.match(htmlDoc, /Compared on<\/b> \(same on both sides\)|<th>Slicer<\/th><th>A<\/th><th>B<\/th>/, 'each page lists the filters it was compared on');
 
   const pdf = await renderRunPdf(bundle);
   assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');

@@ -12,15 +12,83 @@ const LAYOUT_LABEL = {
 
 export const levelOf = (score) => (score <= 0 ? 'none' : score <= 2 ? 'low' : score <= 6 ? 'medium' : 'high');
 
-/** Value-level changes from a visual's data diff (A → B), skipping unchanged runs. */
-function valueChanges(data) {
+// Text Power BI adds to cells for screen readers; never part of the value.
+const CELL_NOISE = /Additional Conditional Formatting/g;
+const NOISE_CELL = /^(select row|row selection)$/i;
+const NUM = /[-+]?\d[\d,]*(?:\.\d+)?%?/g;
+const cleanLine = (s) => (s == null ? null : String(s).replace(CELL_NOISE, '').replace(/^•\s*/, '').replace(/[ \t]+/g, ' ').trim());
+const cellsOf = (s) => s.split('|').map((c) => c.trim());
+const shapeOf = (s) => s.replace(NUM, '#');
+const isNum = (c) => c !== '' && c.replace(NUM, '') === '';
+
+/** What a changed row is about (its text cells) and which cells changed. */
+export function describeChange(a, b) {
+  const ca = cellsOf(a), cb = cellsOf(b);
+  if (ca.length !== cb.length || ca.length < 2) return { key: '', cells: [{ a, b }] };
+  const key = [], cells = [];
+  ca.forEach((x, i) => {
+    if (x === cb[i]) { if (x && !isNum(x) && !NOISE_CELL.test(x)) key.push(x); }
+    else cells.push({ a: x || '(blank)', b: cb[i] || '(blank)' });
+  });
+  return { key: key.join(' · '), cells };
+}
+
+/**
+ * Value-level changes from a visual's data diff (A → B). Unchanged context
+ * lines are left out, and a removed + added line for the same row (same text,
+ * different numbers) is one change, even when the diff listed them apart.
+ */
+export function valueChanges(data) {
   if (!data || data.equal) return [];
   const out = [];
+  let block = [];
+  const flush = () => {
+    if (!block.length) return;
+    const dels = [], adds = [];
+    for (const o of block) {
+      if (o.a != null) dels.push({ t: o.a, used: false });
+      if (o.b != null) adds.push({ t: o.b, used: false });
+    }
+    const pair = new Map();
+    const tryPair = (ok) => {
+      for (const d of dels) {
+        if (pair.has(d)) continue;
+        let best = null, bestScore = -1;
+        for (const x of adds) {
+          if (x.used) continue;
+          const s = ok(d.t, x.t);
+          if (s > bestScore) { best = x; bestScore = s; }
+        }
+        if (best && bestScore >= 0) { best.used = true; pair.set(d, best); }
+      }
+    };
+    const same = (a, b) => { const ca = cellsOf(a), cb = cellsOf(b); return ca.reduce((n, c, i) => n + (c === cb[i] ? 1 : 0), 0); };
+    // Same row (same text, numbers aside), the one sharing most cells first.
+    tryPair((a, b) => (shapeOf(a) === shapeOf(b) ? same(a, b) : -1));
+    // Then rows with the same columns that still share at least half the cells.
+    tryPair((a, b) => { const n = cellsOf(a).length; return n > 1 && n === cellsOf(b).length && same(a, b) * 2 >= n ? same(a, b) : -1; });
+    for (const d of dels) {
+      const x = pair.get(d);
+      out.push(x ? { op: 'chg', a: d.t, b: x.t, ...describeChange(d.t, x.t) } : { op: 'del', a: d.t, b: null });
+    }
+    for (const x of adds) if (!x.used) out.push({ op: 'add', a: null, b: x.t });
+    block = [];
+  };
   for (const o of data.ops || []) {
-    if (o.op === 'skip') continue;
-    out.push({ op: o.op, a: o.a ?? null, b: o.b ?? null });
+    if (o.op === 'eq' || o.op === 'skip') { flush(); continue; }
+    block.push({ a: cleanLine(o.a), b: cleanLine(o.b) });
   }
-  return out;
+  flush();
+  // Lines that only differed by screen-reader text are not changes.
+  return out.filter((c) => c.op !== 'chg' || c.a !== c.b);
+}
+
+/** One readable line for a value change: "FG INVENTORY · CN: 17.36 → 17.41". */
+export function changeText(c, n = 30) {
+  if (c.op === 'add') return `+ ${clip(c.b, n + 20)} (only in B)`;
+  if (c.op === 'del') return `− ${clip(c.a, n + 20)} (only in A)`;
+  const cells = (c.cells || [{ a: c.a, b: c.b }]).map((x) => `${clip(x.a, n)} → ${clip(x.b, n)}`).join(', ');
+  return c.key ? `${clip(c.key, 50)}: ${cells}` : cells;
 }
 
 function interactionSummary(r) {
@@ -31,6 +99,26 @@ function interactionSummary(r) {
   if (d.data && !d.data.equal) return `Data differs (+${d.data.added ?? 0} / −${d.data.removed ?? 0} lines)`;
   if (r.diff_ratio) return `${(r.diff_ratio * 100).toFixed(2)}% of pixels differ`;
   return r.status;
+}
+
+/**
+ * Older runs did not store the filters a page was compared on: read them from
+ * the slicer visuals' text (same text on both sides when the check passed).
+ */
+function filtersFromVisuals(visualRows) {
+  const out = [];
+  for (const r of visualRows) {
+    const m = /^Slicer · (.+)$/.exec(r.title || '');
+    if (!m || out.some((f) => f.slicer === m[1])) continue;
+    const d = r.details || {};
+    const shown = (l) => (l?.length ? l.map(cleanLine).join(' ') : '(nothing shown)');
+    if (d.missingIn) { out.push({ slicer: m[1], a: d.missingIn === 'A' ? null : '?', b: d.missingIn === 'B' ? null : '?', same: false, how: '', fromText: true }); continue; }
+    const ch = valueChanges(d.data);
+    if (!ch.length) { out.push({ slicer: m[1], a: shown(d.sample), b: shown(d.sample), same: true, how: '', fromText: true }); continue; }
+    const a = ch.map((c) => c.a).filter(Boolean).join(' '), b = ch.map((c) => c.b).filter(Boolean).join(' ');
+    out.push({ slicer: m[1], a: a || '(nothing shown)', b: b || '(nothing shown)', same: false, how: '', fromText: true });
+  }
+  return out;
 }
 
 export function runChanges(runId) {
@@ -84,10 +172,11 @@ export function runChanges(runId) {
       health,
       selections,
       comparedOn: render?.details?.selections || [],
+      filters: render?.details?.filters || filtersFromVisuals(visualRows),
     };
   });
   for (const name of inv.onlyInB || []) {
-    pages.push({ name, renamedTo: null, state: 'added', level: 'medium', score: 0, checks: 0, byStatus: {}, problems: 0, accepted: 0, pixel: null, renderResultId: null, layout: [], values: [], valuesChanged: 0, visualsChanged: [], interactions: [], health: [], selections: [], comparedOn: [] });
+    pages.push({ name, renamedTo: null, state: 'added', level: 'medium', score: 0, checks: 0, byStatus: {}, problems: 0, accepted: 0, pixel: null, renderResultId: null, layout: [], values: [], valuesChanged: 0, visualsChanged: [], interactions: [], health: [], selections: [], comparedOn: [], filters: [] });
   }
 
   // Data model (report level).
@@ -118,6 +207,7 @@ export function runChanges(runId) {
     interactionsChanged: sum((p) => p.interactions.filter((i) => i.status !== 'accepted').length),
     modelChanges: model ? model.changes.filter((c) => !c.accepted).length : 0,
     selectionsDiffer: sum((p) => p.selections.filter((x) => x.status !== 'accepted' && x.status !== 'pass').length),
+    pagesFilteredDifferently: pages.filter((p) => p.filters.some((f) => f.same === false && f.how !== 'aligned')).length,
     problems: sum((p) => p.problems),
     accepted: sum((p) => p.accepted),
   };
@@ -169,7 +259,7 @@ export function topDifferences(ch, results, max = 12) {
     for (const h of p.health) add({ priority: 'P1', area: 'Visual error', page: p.name, title: `${h.visual} shows an error in ${h.side}`, evidence: clip(h.error, 80), owner: 'Report developer', ids: [] });
     for (const v of p.values) {
       if (v.status === 'accepted') continue;
-      const chg = v.changes.slice(0, 3).map((c) => (c.op === 'chg' ? `${clip(c.a, 25)} → ${clip(c.b, 25)}` : c.op === 'add' ? `+ ${clip(c.b, 25)}` : `− ${clip(c.a, 25)}`)).join('; ');
+      const chg = v.changes.slice(0, 3).map((c) => changeText(c, 20)).join('; ');
       add({ priority: 'P1', area: 'Numbers', page: p.name, title: `${v.visual} shows different values`, evidence: `${chg}${v.changes.length > 3 ? ` (+${v.changes.length - 3} more)` : ''}`, owner: 'Data / model owner', ids: [v.resultId] });
     }
     for (const v of p.visualsChanged) {
