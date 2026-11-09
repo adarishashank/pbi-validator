@@ -234,6 +234,7 @@ export async function executeRun(ctx) {
     await runPhase('interactive', 0.4, 0.97);
 
     counters.reloads = lanes.flatMap((l) => l.sides).reduce((n, s) => n + s.report.reloads, 0);
+    counters.resets = lanes.flatMap((l) => l.sides).reduce((n, s) => n + s.report.resets, 0);
     counters.parallelPages = lanes.length;
     ctx.progress(0.99, 'Finalising');
     for (const s of sides) {
@@ -533,7 +534,7 @@ async function processPage(env) {
     // A page that never returns to its first screenshot (live data, animations,
     // persisted filters) would otherwise be reloaded after every check.
     r.forEach((x, i) => { if (x.drifted && x.shot) base[sides[i].name] = x.shot; });
-    if (r.some((x) => x.reloaded)) await refresh();
+    if (r.some((x) => x.reloaded || x.reset)) await refresh();
   };
 
 

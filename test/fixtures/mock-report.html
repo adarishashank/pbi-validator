@@ -46,6 +46,7 @@
   <button aria-label="Previous Page" id="prev">‹</button>
   <a class="middleText" id="counter"></a>
   <button aria-label="Next Page" id="next">›</button>
+  <button aria-label="Reset to default" id="reset" style="display:none" disabled>Reset</button>
 </span>
 <div class="tooltip-container" id="tip"></div>
 <div class="menu" id="menu"></div>
@@ -117,6 +118,17 @@ function matrixBody() {
   return h + '</div>';
 }
 
+// ?reset=1: a "Reset to default" button like the service's, enabled once the
+// report differs from its published state; it puts slicers, drill and expanded
+// rows back (the page stays).
+const RESET = QS.has('reset');
+const DEFAULT_REGION = QS.get('sel') || null;
+const isDefault = () => st.region === DEFAULT_REGION && st.level === 0 && !st.drillRegion && !st.drillCity && !st.expanded.size && !st.through && dd.biz === (QS.get('biz') || 'All');
+function resetButton() {
+  const b = document.getElementById('reset');
+  b.style.display = RESET ? '' : 'none';
+  b.disabled = !RESET || isDefault();
+}
 function render() {
   const c = document.getElementById('canvas');
   const p = st.through ? 'Region detail' : PAGES[st.page];
@@ -154,6 +166,7 @@ function render() {
   renderPopup();
   document.getElementById('counter').innerHTML = `<span class="innerText">${st.page + 1}</span> <span class="innerText">of</span> <span class="innerText">${PAGES.length}</span>`;
   document.getElementById('pagelist').innerHTML = PAGES.map((n, i) => `<button class="sectionItem${i === st.page && !st.through ? ' selected' : ''}" aria-label="${n}" data-i="${i}">${n}</button>`).join('');
+  resetButton();
 }
 
 function renderPopup() {
@@ -177,6 +190,7 @@ document.addEventListener('click', (e) => {
   document.getElementById('menu').style.display = 'none';
   if (t.closest('#counter')) { document.getElementById('pagelist').classList.toggle('open'); return; }
   if (t.matches('.sectionItem')) { document.getElementById('pagelist').classList.remove('open'); return update(() => { st.page = +t.dataset.i; st.through = null; }); }
+  if (t.closest('#reset')) return !t.closest('#reset').disabled && update(() => { Object.assign(st, { region: DEFAULT_REGION, level: 0, drillRegion: null, drillCity: null, through: null }); st.expanded.clear(); dd.biz = QS.get('biz') || 'All'; });
   if (t.closest('#next')) return st.page < PAGES.length - 1 && update(() => { st.page++; });
   if (t.closest('#prev')) return st.page > 0 && update(() => { st.page--; });
   if (t.closest('#goDetails')) return update(() => { st.page = B ? 2 : 1; });

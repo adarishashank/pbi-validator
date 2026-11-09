@@ -33,6 +33,7 @@ export class PbiReport {
     this.pageItemSelector = null;
     this.reloads = 0;
     this.afterReload = null; // set by the runner while a page has deliberate slicer selections
+    this.resets = 0; // restores done with "Reset to default" instead of a reload
     this.popups = [];
     // Only windows this tab opens (other tabs of the same browser context belong to other workers).
     page.on('popup', (p) => this.popups.push(p));
@@ -87,7 +88,7 @@ export class PbiReport {
   /** Service only: undo persistent filters so both sides start from the published state. */
   async resetToDefault() {
     const btn = this.frame.locator(joinSel(this.sel.resetToDefault)).first();
-    if (!(await btn.isVisible().catch(() => false)) || !(await btn.isEnabled().catch(() => false))) return;
+    if (!(await btn.isVisible().catch(() => false)) || !(await btn.isEnabled().catch(() => false))) return false;
     this.log('info', 'Applying "Reset to default" to clear persistent filters');
     await btn.click({ timeout: 5000 }).catch(() => {});
     for (const s of asList(this.sel.resetConfirm)) {
@@ -95,6 +96,7 @@ export class PbiReport {
       if (await c.isVisible().catch(() => false)) { await c.click({ timeout: 5000 }).catch(() => {}); break; }
     }
     await sleep(1000);
+    return true;
   }
 
   /** Waits until no spinners are visible and both DOM and pixels stop changing. */
@@ -293,6 +295,15 @@ export class PbiReport {
     if ((await this.currentPageIndex()) !== ref.index) await this.gotoPage(ref).catch(() => {});
     let shot = await this.screenshotCanvas();
     if (quickRatio(shot, baseline, this.cfg.thresholds.pixelThreshold) <= tol) return { reloaded: false };
+    // "Reset to default" puts slicers, filters, drill and sort back in a few
+    // seconds; a reload opens the whole report again (often well over a minute).
+    if (this.cfg.resetToDefaultOnLoad && await this.resetToDefault()) {
+      await this.waitStable();
+      if ((await this.currentPageIndex()) !== ref.index) await this.gotoPage(ref).catch(() => {});
+      if (this.afterReload) await this.afterReload().catch((e) => this.log('warn', `Could not re-apply slicer selections after reset: ${e.message.split('\n')[0]}`));
+      shot = await this.screenshotCanvas();
+      if (quickRatio(shot, baseline, this.cfg.thresholds.pixelThreshold) <= tol) { this.resets++; return { reloaded: false, reset: true }; }
+    }
     await this.reloadToPage(ref);
     shot = await this.screenshotCanvas();
     const r = quickRatio(shot, baseline, this.cfg.thresholds.pixelThreshold);
