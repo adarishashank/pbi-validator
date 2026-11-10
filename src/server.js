@@ -42,7 +42,7 @@ export function createApp() {
   // Screenshots are behind sign-in, so browsers may cache them only privately.
   const artifactOpts = { immutable: true, maxAge: '7d', index: false, dotfiles: 'deny', setHeaders: (res) => res.setHeader('Cache-Control', 'private, max-age=604800, immutable') };
   app.use('/artifacts/runs', express.static(config.runsDir, artifactOpts));
-  app.use('/artifacts/discovery', express.static(config.discoveryDir, { ...artifactOpts, setHeaders: (res) => res.setHeader('Cache-Control', 'private, no-cache') }));
+  app.use('/artifacts/discovery', express.static(config.discoveryDir, { ...artifactOpts, setHeaders: (res) => res.setHeader('Cache-Control', 'private, max-age=86400') })); // the UI cache-busts these with ?t=<discovery time>
 
   // Front-end vendor modules (no build step). Bare "preact" imports are
   // rewritten so the browser can load them without an import map.
@@ -62,8 +62,10 @@ export function createApp() {
     res.send(vendorCache.get(rel));
   });
 
-  app.use(express.static(path.join(ROOT, 'public'), { index: 'index.html', maxAge: 0 }));
-  app.get(/^\/(?!api|artifacts|vendor).*/, (req, res) => res.sendFile(path.join(ROOT, 'public', 'index.html')));
+  // Unversioned JS/CSS: always revalidate (ETag -> 304), so a deploy never leaves a mix of old and new modules.
+  const noCache = (res) => res.setHeader('Cache-Control', 'no-cache');
+  app.use(express.static(path.join(ROOT, 'public'), { index: 'index.html', maxAge: 0, setHeaders: noCache }));
+  app.get(/^\/(?!api|artifacts|vendor).*/, (req, res) => { noCache(res); res.sendFile(path.join(ROOT, 'public', 'index.html')); });
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {

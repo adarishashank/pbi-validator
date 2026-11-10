@@ -8,7 +8,7 @@ export function Runs({ query }) {
   const suite = query.get('suite') || '';
   const status = query.get('status') || '';
   const qs = new URLSearchParams({ limit: '200', ...(suite && { suite }), ...(status && { status }) }).toString();
-  const { data } = useApi(`/runs?${qs}`, { poll: 3000, deps: [qs] });
+  const { data } = useApi(`/runs?${qs}`, { poll: (d) => (d && d.some((r) => ['queued', 'running'].includes(r.status)) ? 3000 : 30000), deps: [qs] });
   const suites = useApi('/suites');
   const setQ = (k, v) => {
     const p = new URLSearchParams(query);

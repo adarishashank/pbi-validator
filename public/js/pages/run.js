@@ -1,12 +1,20 @@
 import { html, useState, useEffect, useMemo, useRef, useCallback, api, go, downloadFile, can, fmtDate, fmtDur, runDuration, pct, setStore, STATUS_ORDER, STATUS_LABEL, SCENARIO_LABEL } from '../lib.js';
-import { Badge, Progress, Modal, Menu, act, confirmDialog, zoom, Spinner } from '../ui.js';
+import { Badge, Progress, Modal, Menu, act, confirmDialog, zoom, Spinner, lazy } from '../ui.js';
 import { Topbar } from './common.js';
-import { AiInsights, AiChat, VisionPanel } from './ai.js';
-import { PublishControl } from './publish.js';
-import { WhatChanged } from './changes.js';
+
+// Tab-only panels load on first use.
+const AiInsights = lazy(() => import('./ai.js'), 'AiInsights');
+const AiChat = lazy(() => import('./ai.js'), 'AiChat');
+const VisionPanel = lazy(() => import('./ai.js'), 'VisionPanel');
+const PublishControl = lazy(() => import('./publish.js'), 'PublishControl');
+const WhatChanged = lazy(() => import('./changes.js'), 'WhatChanged');
 
 const PROBLEM = new Set(['fail', 'error', 'missing', 'diff', 'warn']);
 const img = (runId, f) => `/artifacts/runs/${runId}/${f}`;
+const CHUNK = 150; // result rows rendered at a time
+// List thumbnails (<name>.thumb.png) exist for newer runs; older runs fall back to the full image, once.
+const thumbSrc = (runId, f) => img(runId, f).replace(/\.png$/, '.thumb.png');
+const toFull = (e, full) => { const t = e.target; if (t.dataset.fb) return; t.dataset.fb = '1'; t.src = full; };
 
 // ------------------------------------------------------------ comparison
 function Swipe({ a, b }) {
@@ -117,7 +125,10 @@ function ResultView({ r: initial, run, ai, reloadAi, onChanged }) {
     ${d.dataPoint && html`<div class="muted">Data point clicked: A <code>${d.dataPoint.A}</code>${d.dataPoint.B !== undefined ? html` · B <code>${d.dataPoint.B}</code>` : ''}</div>`}
 
     ${d.data && !d.data.equal && html`<div><h3 style="margin-bottom:6px">Data differences <span class="muted small">(+${d.data.added} / −${d.data.removed} lines)</span></h3><${DiffTable} data=${d.data} aLabel=${capA} bLabel=${capB} /></div>`}
-    ${d.data?.equal && html`<div class="small" style="color:var(--pass)">✔ Extracted data identical (${d.data.totalA} lines)</div>`}
+    ${d.data?.equal && html`<div class="small" style="color:var(--pass)">✔ Extracted data identical (${d.data.totalA} lines)${d.partial ? ' — only the part shown on screen was read' : ''}</div>`}
+    ${d.query && !d.query.equal && html`<div><h3 style="margin-bottom:6px">Data behind the visual differs <span class="muted small">(+${d.query.added} / −${d.query.removed} rows · every row Power BI loaded, unrounded)</span></h3><${DiffTable} data=${d.query} aLabel=${capA} bLabel=${capB} /></div>`}
+    ${d.query?.equal && html`<div class="small" style="color:var(--pass)">✔ Data behind the visual identical (${d.query.rowsA} rows, unrounded${d.query.complete ? '' : '; first batch Power BI loaded'})</div>`}
+    ${d.partial && !d.query && html`<div class="small muted">Only the rows drawn on screen were compared for this visual.</div>`}
     ${d.dataDiffs && (d.dataDiffs.length ? html`<div><h3 style="margin-bottom:6px">${d.dataDiffs.length} visual(s) show different data after this interaction</h3>
       ${d.dataDiffs.map((x) => html`<details open=${d.dataDiffs.length <= 3} style="margin-bottom:6px"><summary><b>${x.visual}</b> ${x.only ? html`<${Badge} s="missing" label=${`only in ${x.only}`} />` : html`<span class="muted small">+${x.added} / −${x.removed}</span>`}</summary>${x.ops && html`<${DiffTable} data=${{ ops: x.ops }} aLabel=${capA} bLabel=${capB} />`}</details>`)}</div>`
       : html`<div class="small" style="color:var(--pass)">✔ All visuals show identical data after the interaction</div>`)}
@@ -187,14 +198,19 @@ export function RunDetail({ id }) {
   const reloadAi = useCallback(async () => { try { setAi(await loadAi()); } catch { /* ignore */ } }, [loadAi]);
   const [err, setErr] = useState(null);
   const [tab, setTab] = useState('results');
+  const tabRef = useRef(tab); tabRef.current = tab;
   const [f, setF] = useState({ status: '', scenario: '', page: '', q: '', problems: false });
   const logRef = useRef(null);
+  const resultsRef = useRef([]); resultsRef.current = results;
+  const logsOn = useRef(false); // true once the Logs tab has been opened
+  const logBuf = useRef([]); // live log lines waiting for the next animation frame
+  const [shown, setShown] = useState(CHUNK);
   const live = run && ['queued', 'running'].includes(run.status);
 
   const loadAll = useCallback(async () => {
     try {
-      const [r, rs, lg] = await Promise.all([api(`/runs/${id}`), api(`/runs/${id}/results`), api(`/runs/${id}/logs`)]);
-      setRun(r); setResults(rs); setLogs(lg);
+      const [r, rs, lg] = await Promise.all([api(`/runs/${id}`), api(`/runs/${id}/results`), logsOn.current ? api(`/runs/${id}/logs`) : null]);
+      setRun(r); setResults(rs); if (lg) setLogs(lg);
       if (!['queued', 'running'].includes(r.status) && rs.some((x) => PROBLEM.has(x.status))) setF((x) => ({ ...x, problems: true }));
     } catch (e) { setErr(e.message); }
   }, [id]);
@@ -206,24 +222,60 @@ export function RunDetail({ id }) {
     return () => clearInterval(t);
   }, [ai, reloadAi]);
 
+  // Only the rows after the highest seq held are fetched (and appended) as results stream in.
+  const loadNewResults = useCallback(async () => {
+    const rs = await api(`/runs/${id}/results?after=${resultsRef.current.reduce((m, x) => Math.max(m, x.seq), 0)}`);
+    if (rs.length) setResults((prev) => { const have = new Set(prev.map((x) => x.id)); const add = rs.filter((x) => !have.has(x.id)); return add.length ? [...prev, ...add] : prev; });
+  }, [id]);
+
+  // Logs load when the Logs tab is first opened, then stay live from the event stream.
+    useEffect(() => {
+    if (tab !== 'logs') return;
+    logsOn.current = true;
+    api(`/runs/${id}/logs`).then((lg) => {
+      const seen = new Set(lg.map((l) => `${l.ts}|${l.message}`));
+      const extra = logBuf.current.filter((l) => !seen.has(`${l.ts}|${l.message}`));
+      logBuf.current = [];
+      setLogs([...lg, ...extra]);
+    }, () => {});
+  }, [tab, id]);
+
   // Live updates while running.
   useEffect(() => {
     if (!live) return undefined;
     const es = new EventSource(`/api/runs/${id}/events`);
-    let pending = false;
-    es.addEventListener('progress', (e) => { const d = JSON.parse(e.data); setRun((r) => r && ({ ...r, status: 'running', progress: d.progress, phase: d.phase, summary: d.counts })); });
-    es.addEventListener('log', (e) => { const d = JSON.parse(e.data); setLogs((l) => [...l.slice(-4000), { id: `${Date.now()}${Math.random()}`, ...d }]); });
-    es.addEventListener('result', () => {
+    let pending = false, connected = false, tick = 0, frame = 0, opened = false, gone = false;
+    const scheduleResults = () => {
       if (pending) return;
       pending = true;
-      setTimeout(async () => { pending = false; try { setResults(await api(`/runs/${id}/results`)); } catch { /* ignore */ } }, 1500);
+      setTimeout(async () => { pending = false; if (!gone) { try { await loadNewResults(); } catch { /* ignore */ } } }, 1500);
+    };
+    // Log lines are batched into one state update per animation frame.
+    const flushLogs = () => { frame = 0; if (!logsOn.current || !logBuf.current.length) return; const batch = logBuf.current; logBuf.current = []; setLogs((l) => [...l, ...batch].slice(-4000)); };
+    es.onopen = () => { connected = true; if (opened) scheduleResults(); opened = true; };
+    es.onerror = () => { connected = false; };
+    es.addEventListener('progress', (e) => { const d = JSON.parse(e.data); setRun((r) => r && ({ ...r, status: 'running', progress: d.progress, phase: d.phase, summary: d.counts })); });
+    es.addEventListener('log', (e) => {
+      if (!logsOn.current) return;
+      logBuf.current.push({ id: `${Date.now()}${Math.random()}`, ...JSON.parse(e.data) });
+      if (logBuf.current.length > 4000) logBuf.current.splice(0, logBuf.current.length - 4000);
+      if (!frame && tabRef.current === 'logs') frame = requestAnimationFrame(flushLogs);
     });
+    es.addEventListener('result', scheduleResults);
     es.addEventListener('done', () => { es.close(); setTimeout(() => { loadAll(); reloadAi(); }, 300); });
-    const t = setInterval(async () => { try { const r = await api(`/runs/${id}`); setRun((x) => ({ ...x, ...r })); if (!['queued', 'running'].includes(r.status)) loadAll(); } catch { /* ignore */ } }, 8000);
-    return () => { es.close(); clearInterval(t); };
-  }, [id, live, loadAll, reloadAi]);
+    // Fallback poll: slow while the stream is connected, quick if it dropped.
+    const t = setInterval(async () => {
+      tick += 1;
+      if (connected && tick % 6) return;
+      try { const r = await api(`/runs/${id}`); setRun((x) => ({ ...x, ...r })); if (!['queued', 'running'].includes(r.status)) loadAll(); else if (!connected) loadNewResults(); } catch { /* ignore */ }
+    }, 5000);
+    return () => { gone = true; es.close(); clearInterval(t); if (frame) cancelAnimationFrame(frame); };
+  }, [id, live, loadAll, loadNewResults, reloadAi]);
 
+  useEffect(() => { if (tab === 'logs' && logBuf.current.length && logsOn.current) { const b = logBuf.current; logBuf.current = []; setLogs((l) => [...l, ...b].slice(-4000)); } }, [tab]);
   useEffect(() => { if (tab === 'logs' && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [logs, tab]);
+
+  useEffect(() => { setShown(CHUNK); }, [f]);
 
   const pages = useMemo(() => [...new Set(results.map((r) => r.page))], [results]);
   const scenarios = useMemo(() => [...new Set(results.map((r) => r.scenario))], [results]);
@@ -285,7 +337,7 @@ export function RunDetail({ id }) {
         <button class=${tab === 'ai' ? 'on' : ''} onClick=${() => setTab('ai')}>🤖 AI insights${ai?.summary?.content?.risk ? ` · ${ai.summary.content.risk}` : ''}</button>
         <button class=${tab === 'ask' ? 'on' : ''} onClick=${() => setTab('ask')}>Ask AI</button>
         <button class=${tab === 'matrix' ? 'on' : ''} onClick=${() => setTab('matrix')}>Coverage</button>
-        <button class=${tab === 'logs' ? 'on' : ''} onClick=${() => setTab('logs')}>Log (${logs.length})</button>
+        <button class=${tab === 'logs' ? 'on' : ''} onClick=${() => setTab('logs')}>Log</button>
       </div>
 
       ${tab === 'results' && html`<div>
@@ -296,7 +348,7 @@ export function RunDetail({ id }) {
           <span class="spacer"></span><span class="small muted">${filtered.length} shown</span>
         </div>
         ${filtered.length === 0 && html`<div class="panel"><div class="empty">${results.length ? (f.problems ? html`<h3 style="color:var(--pass)">✔ No problems</h3>Every check passed. Switch to “All” to browse the screenshots.` : 'No results match the filters.') : live ? html`<${Spinner} /> Waiting for first results…` : 'No results.'}</div></div>`}
-        ${filtered.map((r) => {
+        ${filtered.slice(0, shown).map((r) => {
           const header = r.page !== lastPage ? html`<div class="page-group"><h3>${r.page || 'Report'}</h3></div>` : null;
           lastPage = r.page;
           const im = r.images || {};
@@ -305,9 +357,10 @@ export function RunDetail({ id }) {
             <div><${Badge} s=${r.status} /></div>
             <div><span class="tag">${SCENARIO_LABEL[r.scenario] || r.scenario}</span></div>
             <div class="title"><div>${r.title}</div>${r.details?.note && html`<div class="small muted">${r.details.note}</div>`}</div>
-            <div class="thumbs">${thumbs.map((t) => html`<img src=${img(run.id, t)} loading="lazy" alt="" />`)}</div>
+            <div class="thumbs">${thumbs.map((t) => html`<img src=${thumbSrc(run.id, t)} onError=${(e) => toFull(e, img(run.id, t))} loading="lazy" alt="" />`)}</div>
             <div class="pct">${r.diff_ratio != null ? pct(r.diff_ratio) : ''}</div></div>`;
         })}
+        ${filtered.length > shown && html`<div class="row" style="justify-content:center;margin:10px 0"><button class="btn" onClick=${() => setShown((n) => n + CHUNK)}>Show more (${filtered.length - shown} more)</button></div>`}
       </div>`}
 
       ${tab === 'matrix' && html`<div class="panel"><table class="t"><thead><tr><th>Scenario</th>${STATUS_ORDER.map((s) => html`<th>${STATUS_LABEL[s]}</th>`)}<th>Total</th></tr></thead><tbody>

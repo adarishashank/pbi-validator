@@ -152,7 +152,7 @@ function RemoteLogin({ profile, onDone }) {
 }
 
 export function Profiles() {
-  const { data, reload } = useApi('/profiles', { poll: 2500 });
+  const { data, reload } = useApi('/profiles', { poll: (d) => (d && d.some((p) => p.status === 'signing_in') ? 2500 : 30000) });
   const list = data || [];
   const edit = (p) => setStore({ modal: html`<${ProfileForm} profile=${p} onDone=${reload} />` });
   const login = (p) => setStore({ modal: html`<${RemoteLogin} profile=${p} onDone=${reload} />` });

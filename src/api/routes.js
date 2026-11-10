@@ -255,10 +255,15 @@ const SuiteSchema = z.object({
   if (s.mode === 'compare' && s.report_a_id === s.report_b_id) c.addIssue({ code: 'custom', path: ['report_b_id'], message: 'Report B must differ from report A' });
 });
 
-const suiteOut = (s) => {
-  const last = q.get('SELECT id, status, progress, finished_at, summary FROM runs WHERE suite_id = ? ORDER BY id DESC LIMIT 1', s.id);
+const suiteOut = (s, last) => {
+  if (last === undefined) last = q.get('SELECT id, status, progress, finished_at, summary FROM runs WHERE suite_id = ? ORDER BY id DESC LIMIT 1', s.id);
   return { ...s, last_run: last || null, next_run: nextRunOf(s.id) };
 };
+/** Latest run per suite in one query (the suites list is polled). */
+const lastRunsBySuite = () => new Map(q.all('SELECT id, suite_id, status, progress, finished_at, summary FROM runs WHERE id IN (SELECT MAX(id) FROM runs WHERE suite_id IS NOT NULL GROUP BY suite_id)')
+  .map(({ suite_id: sid, ...r }) => [sid, r]));
+/** Positive integer from a query param, clamped to [1, max]. */
+const limitParam = (v, def, max) => Math.min(Math.max(Math.trunc(Number(v)) || def, 1), max);
 
 function normaliseSuite(body) {
   const d = parse(SuiteSchema, body);
@@ -271,7 +276,7 @@ function normaliseSuite(body) {
   return d;
 }
 
-router.get('/suites', (req, res) => res.json(q.all('SELECT * FROM suites ORDER BY name').map(suiteOut)));
+router.get('/suites', (req, res) => { const last = lastRunsBySuite(); res.json(q.all('SELECT * FROM suites ORDER BY name').map((s) => suiteOut(s, last.get(s.id) || null))); });
 router.get('/suites/:id', wrap((req, res) => res.json(suiteOut(mustGet('suites', idParam(req))))));
 router.post('/suites', wrap((req, res) => {
   const d = normaliseSuite(req.body);
@@ -330,16 +335,16 @@ const trendOf = (where, params, limit) => q.all(`SELECT id, suite_id, suite_name
   }));
 router.get('/suites/:id/trend', wrap((req, res) => {
   const id = idParam(req); const s = mustGet('suites', id);
-  res.json({ suite: { id: s.id, name: s.name }, runs: trendOf('AND suite_id = ?', [id], Math.min(Number(req.query.limit) || 30, 200)) });
+  res.json({ suite: { id: s.id, name: s.name }, runs: trendOf('AND suite_id = ?', [id], limitParam(req.query.limit, 30, 200)) });
 }));
-router.get('/trend', (req, res) => res.json({ runs: trendOf('', [], Math.min(Number(req.query.limit) || 30, 200)) }));
+router.get('/trend', (req, res) => res.json({ runs: trendOf('', [], limitParam(req.query.limit, 30, 200)) }));
 
 // ------------------------------------------------------------------- runs
 const listRuns = (query, max = 500) => {
   const where = [], params = [];
   if (query.suite) { where.push('suite_id = ?'); params.push(Number(query.suite)); }
   if (query.status) { where.push('status = ?'); params.push(String(query.status)); }
-  const limit = Math.min(Number(query.limit) || 100, max);
+  const limit = limitParam(query.limit, 100, max);
   return q.all(`SELECT id, suite_id, suite_name, trigger, triggered_by, status, progress, phase, summary, error, queued_at, started_at, finished_at FROM runs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ${limit}`, ...params);
 };
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -375,7 +380,10 @@ router.get('/runs/:id/changes', wrap((req, res) => {
 }));
 router.get('/runs/:id/results', wrap((req, res) => {
   const id = idParam(req);
-  res.json(q.all('SELECT * FROM results WHERE run_id = ? ORDER BY seq', id));
+  const after = Number(req.query.after);
+  res.json(req.query.after !== undefined && req.query.after !== '' && Number.isFinite(after)
+    ? q.all('SELECT * FROM results WHERE run_id = ? AND seq > ? ORDER BY seq', id, after)
+    : q.all('SELECT * FROM results WHERE run_id = ? ORDER BY seq', id));
 }));
 router.get('/runs/:id/logs', wrap((req, res) => {
   const id = idParam(req);

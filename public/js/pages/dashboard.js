@@ -4,8 +4,9 @@ import { Topbar, SummaryChips } from './common.js';
 import { OutcomeChart } from './trends.js';
 
 export function Dashboard() {
-  const stats = useApi('/stats', { poll: 5000 });
-  const runs = useApi('/runs?limit=12', { poll: 3000 });
+  // Poll fast only while a run is queued/running, slowly otherwise.
+  const runs = useApi('/runs?limit=12', { poll: (d) => (d && d.some((r) => ['queued', 'running'].includes(r.status)) ? 3000 : 30000) });
+  const stats = useApi('/stats', { poll: (d) => (d?.active > 0 ? 5000 : 30000) });
   const profiles = useApi('/profiles');
   const trend = useApi('/trend?limit=30', { poll: 30000 });
   const s = stats.data || {};

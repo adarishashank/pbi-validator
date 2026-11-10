@@ -8,7 +8,7 @@ export { h, render, useState, useEffect, useRef, useCallback, useMemo };
 // ------------------------------------------------------------------ store
 const listeners = new Set();
 // me: undefined = still loading, null = signed out, else { user, method, roles, roleInfo }
-export const store = { toasts: [], modal: null, lightbox: null, me: undefined, authConfig: null, sessionExpired: false };
+export const store = { toasts: [], modal: null, lightbox: null, me: undefined, authConfig: null, sessionExpired: false, waking: false };
 export function setStore(patch) {
   Object.assign(store, typeof patch === 'function' ? patch(store) : patch);
   listeners.forEach((l) => l());
@@ -28,13 +28,35 @@ export function toast(msg, kind = '') {
 
 // -------------------------------------------------------------------- api
 export class ApiError extends Error {}
-export async function api(path, { method = 'GET', body, raw } = {}) {
-  const res = await fetch(`/api${path}`, {
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  const t = setTimeout(resolve, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason ?? new DOMException('Aborted', 'AbortError')); }, { once: true });
+});
+let waiting = 0;
+const setWaking = (d) => { waiting += d; if ((waiting > 0) !== store.waking) setStore({ waking: waiting > 0 }); };
+/** Fetches /api, retrying the host's "app is waking up" 503 every ~4 s for up to ~3 minutes (shows a notice meanwhile). */
+async function fetchWaking(url, init, signal) {
+  const until = Date.now() + 180_000;
+  let counted = false;
+  try {
+    for (;;) {
+      const res = await fetch(url, init);
+      if (res.status !== 503) return res;
+      const data = await res.clone().json().catch(() => null);
+      if (!data?.waking || Date.now() > until) return res;
+      if (!counted) { counted = true; setWaking(1); }
+      await sleep(Math.max(1, Number(res.headers.get('Retry-After')) || 4) * 1000, signal);
+    }
+  } finally { if (counted) setWaking(-1); }
+}
+export async function api(path, { method = 'GET', body, raw, signal } = {}) {
+  const res = await fetchWaking(`/api${path}`, {
     method,
     headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
-  });
+    signal,
+  }, signal);
   if (raw) return res;
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
@@ -46,20 +68,43 @@ export async function api(path, { method = 'GET', body, raw } = {}) {
   return data;
 }
 
-/** Data hook with reload + optional polling. */
+/**
+ * Data hook with reload + optional polling. Polling pauses while the tab is
+ * hidden (one reload on return), identical data doesn't re-render, and
+ * superseded or post-unmount responses are dropped. `poll` may be a function of
+ * the current data (return 0 to stop) so pages can poll fast only while busy.
+ */
 export function useApi(path, { poll = 0, deps = [] } = {}) {
   const [state, setState] = useState({ data: null, error: null, loading: true });
+  const live = useRef({ seq: 0, ctl: null, dead: false });
+  useEffect(() => { live.current.dead = false; return () => { live.current.dead = true; live.current.ctl?.abort(); }; }, []);
   const reload = useCallback(async () => {
     if (!path) return;
-    try { const data = await api(path); setState({ data, error: null, loading: false }); }
-    catch (e) { setState((s) => ({ ...s, error: e.message, loading: false })); }
+    const L = live.current, seq = ++L.seq;
+    L.ctl?.abort();
+    const ctl = L.ctl = new AbortController();
+    try {
+      const data = await api(path, { signal: ctl.signal });
+      if (L.dead || seq !== L.seq) return;
+      const json = JSON.stringify(data);
+      setState((s) => (!s.error && !s.loading && JSON.stringify(s.data) === json ? s : { data, error: null, loading: false }));
+    } catch (e) {
+      if (L.dead || seq !== L.seq || ctl.signal.aborted) return;
+      setState((s) => (s.error === e.message && !s.loading ? s : { ...s, error: e.message, loading: false }));
+    }
   }, [path]);
   useEffect(() => { reload(); }, [reload, ...deps]);
+  const ms = typeof poll === 'function' ? poll(state.data) : poll;
   useEffect(() => {
-    if (!poll) return undefined;
-    const t = setInterval(reload, poll);
-    return () => clearInterval(t);
-  }, [reload, poll]);
+    if (!ms) return undefined;
+    let t = null;
+    const stop = () => { clearInterval(t); t = null; };
+    const start = () => { if (!t) t = setInterval(reload, ms); };
+    const onVis = () => { if (document.hidden) stop(); else { reload(); start(); } };
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [reload, ms]);
   return { ...state, reload };
 }
 

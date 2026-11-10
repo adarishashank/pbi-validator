@@ -1,15 +1,17 @@
 import { html, render, useRoute, useApi, useEffect, useStore, setStore, loadSession, signOut, can, go } from './lib.js';
-import { Toasts, Lightbox, ModalHost, Spinner } from './ui.js';
+import { Toasts, Lightbox, ModalHost, Spinner, WakingNotice, lazy } from './ui.js';
 import { Dashboard } from './pages/dashboard.js';
 import { Reports } from './pages/reports.js';
 import { Suites } from './pages/suites.js';
 import { Runs } from './pages/runs.js';
-import { RunDetail } from './pages/run.js';
 import { Profiles } from './pages/profiles.js';
 import { Login, Setup, ForcedPasswordChange } from './pages/login.js';
 import { Account, RoleBadge } from './pages/account.js';
-import { Admin } from './pages/admin.js';
 import { Trends } from './pages/trends.js';
+
+// Rarely used pages load on first visit.
+const RunDetail = lazy(() => import('./pages/run.js'), 'RunDetail');
+const Admin = lazy(() => import('./pages/admin.js'), 'Admin');
 
 const NAV = [
   ['', '◧', 'Dashboard'],
@@ -20,9 +22,10 @@ const NAV = [
 ];
 
 function Health() {
-  const { data, error } = useApi('/health', { poll: 10000 });
+  const { data, error } = useApi('/health', { poll: 30000 });
   if (error) return html`<span><span class="dot off"></span>Server unreachable</span>`;
   if (!data) return html`<span>…</span>`;
+  if (data.asleep) return html`<span><span class="dot"></span>Asleep · wakes on use</span>`;
   return html`<span><span class="dot ${data.busy ? 'busy' : ''}"></span>${data.busy ? 'Validation running' : 'Idle · ready'}</span>`;
 }
 
@@ -91,7 +94,7 @@ function App() {
   } else if (s.me.user.must_change_password) body = html`<${ForcedPasswordChange} />`;
   else if (parts[0] === 'login') body = html`<${Login} query=${query} />`;
   else body = html`<${Shell} parts=${parts} query=${query} />`;
-  return html`${body}<${ModalHost} /><${Lightbox} /><${Toasts} />`;
+  return html`${body}<${ModalHost} /><${Lightbox} /><${Toasts} /><${WakingNotice} />`;
 }
 
 render(html`<${App} />`, document.getElementById('app'));

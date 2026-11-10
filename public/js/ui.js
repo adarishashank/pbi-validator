@@ -4,6 +4,24 @@ export const Badge = ({ s, label }) => html`<span class="badge b-${s}">${label |
 
 export const Progress = ({ value, sm }) => html`<div class="progress ${sm ? 'sm' : ''}"><div style=${`width:${Math.round((value || 0) * 100)}%`}></div></div>`;
 
+/** Small notice while the host is starting the app and API calls are being retried. */
+export function WakingNotice() {
+  const s = useStore();
+  return s.waking ? html`<div class="waking" role="status"><span class="spinner"></span>Waking up…</div>` : null;
+}
+
+/** Component loaded on first use with dynamic import(); shows the spinner while the module loads. */
+export function lazy(load, name) {
+  let mod = null;
+  return function Lazy(props) {
+    const [m, setM] = useState(mod);
+    const [err, setErr] = useState(null);
+    useEffect(() => { if (!m) load().then((x) => { mod = x; setM(x); }, (e) => setErr(e.message)); }, []);
+    if (err) return html`<div class="content"><div class="callout err">Could not load this page (${err}). Reload to retry.</div></div>`;
+    return m ? html`<${m[name]} ...${props} />` : html`<div class="content"><${Spinner} /></div>`;
+  };
+}
+
 export const Spinner = () => html`<span class="spinner"></span>`;
 
 export const Empty = ({ title, children }) => html`<div class="empty"><h3>${title}</h3>${children}</div>`;

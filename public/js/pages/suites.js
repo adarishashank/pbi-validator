@@ -13,6 +13,7 @@ const SCENARIOS = [
   ['matrixExpand', 'Matrix +/- expand', 'Expands matrix row groups and compares the expanded data'],
   ['crossFilter', 'Cross-filtering', 'Clicks data points and compares how the rest of the page reacts'],
   ['tooltips', 'Tooltips', 'Hovers data points and compares tooltip content'],
+  ['queryData', 'Data behind each visual', 'Compares the data Power BI downloads for each visual: every row it loads, unrounded. Catches differences hidden by rounding (1.2M) or in rows that are not on screen'],
   ['alignSelections', 'Same slicer values on both sides', 'Before comparing a page, sets B’s slicers to the values selected in A. A slicer that opens on different values is reported once as its own finding instead of making every visual differ'],
   ['model', 'Data model', 'Compares tables, columns, measures (DAX), relationships and security roles of the two semantic models (uploaded model file or Power BI API)'],
 ];
@@ -135,6 +136,7 @@ function SuiteEditor({ suite, reports, defaults, timezone, onDone }) {
         <${Field} label="Max differing pixels (%)" hint="Above this a screenshot is a diff."><input type="number" step="0.01" min="0" max="100" value=${+(c.thresholds.maxDiffRatio * 100).toFixed(4)} onInput=${(e) => setIn('thresholds', 'maxDiffRatio', Number(e.target.value) / 100)} /></${Field}>
         <${Field} label="Per-pixel colour tolerance" hint="0 = exact, 0.1 = default, 0.3 = lenient."><input type="number" step="0.01" min="0" max="1" value=${c.thresholds.pixelThreshold} onInput=${num('thresholds', 'pixelThreshold')} /></${Field}>
         <${Field} label="Layout jitter tolerance (px)" hint="Ignores sub-pixel text/axis shifts."><input type="number" min="0" max="3" value=${c.thresholds.shiftTolerancePx} onInput=${num('thresholds', 'shiftTolerancePx')} /></${Field}>
+        <${Field} label="Small change size (px)" hint="Page and visual screenshots: this many differing pixels in one spot is a difference, however small a share. 0 = off."><input type="number" min="0" max="100000" value=${c.thresholds.minRegionPixels} onInput=${num('thresholds', 'minRegionPixels')} /></${Field}>
         <${Field} label="Position / size tolerance (px)"><input type="number" min="0" max="200" value=${c.thresholds.positionTolerancePx} onInput=${num('thresholds', 'positionTolerancePx')} /></${Field}>
         <${Field} label="Numeric tolerance (relative)" hint="0.001 = values within 0.1% are equal."><input type="number" step="0.0001" min="0" value=${c.thresholds.numericTolerance} onInput=${num('thresholds', 'numericTolerance')} /></${Field}>
         <${Field} label="Retries per scenario"><input type="number" min="0" max="3" value=${c.retries} onInput=${(e) => setC({ ...c, retries: Number(e.target.value) })} /></${Field}>
@@ -166,7 +168,7 @@ function SuiteEditor({ suite, reports, defaults, timezone, onDone }) {
 }
 
 export function Suites() {
-  const { data, reload } = useApi('/suites', { poll: 5000 });
+  const { data, reload } = useApi('/suites', { poll: (d) => (d && d.some((s) => ['queued', 'running'].includes(s.last_run?.status)) ? 5000 : 30000) });
   const reports = useApi('/reports');
   const meta = useApi('/meta');
   const list = data || [];
