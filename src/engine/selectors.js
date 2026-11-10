@@ -61,6 +61,9 @@ export const DEFAULT_SELECTORS = {
     drillThrough: '^drill ?-?through$',
   },
 
+  // Requests in which Power BI downloads a visual's data (URL pattern).
+  queryDataUrl: '/querydata(\\?|$)',
+
   // Detects report-level / visual-level failures.
   reportErrorText: "this content isn't available|we couldn't load the report|couldn't connect to the report|report not found|you don't have access|access denied|something went wrong",
   visualErrorText: "can't display this visual|couldn't load the data|couldn't retrieve the data|something went wrong|visual has exceeded the available resources|cannot display the visual|error fetching data|couldn't load this visual|see details",

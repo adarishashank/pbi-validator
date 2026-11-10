@@ -2,9 +2,10 @@ import crypto from 'node:crypto';
 import { asList, joinSel } from './selectors.js';
 import {
   extractVisualsInPage, renderSignatureInPage, headerButtonsInPage, navigatorItemsInPage,
-  dataPointsInPage, tooltipInPage, contextMenuInPage, canvasBoxInPage,
+  dataPointsInPage, tooltipInPage, contextMenuInPage, canvasBoxInPage, canvasOverflowInPage,
 } from './inpage.js';
 import { quickRatio } from './compare.js';
+import { parseQueryExchange } from './querydata.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -37,6 +38,46 @@ export class PbiReport {
     this.popups = [];
     // Only windows this tab opens (other tabs of the same browser context belong to other workers).
     page.on('popup', (p) => this.popups.push(p));
+
+    // Data requests of this tab. Knowing when they are in flight makes waiting
+    // exact (no fixed pauses), and their answers are the data behind each visual.
+    this.net = { open: new Set(), last: 0, seen: 0, parsing: new Set() };
+    this.queries = new Map(); // visual ID → { seq, lines, rows, complete, error }
+    this.querySeq = 0;
+    let queryRe = null;
+    try { queryRe = new RegExp(sel.queryDataUrl, 'i'); } catch { /* bad override: no tracking */ }
+    const isQuery = (req) => !!queryRe && req.method() === 'POST' && queryRe.test(req.url());
+    page.on('request', (req) => { if (isQuery(req)) { this.net.open.add(req); this.net.seen++; this.net.last = Date.now(); } });
+    const ended = (req) => { if (this.net.open.delete(req)) this.net.last = Date.now(); };
+    page.on('requestfinished', ended);
+    page.on('requestfailed', ended);
+    // A new document (reload, redirect) ends whatever the old one was waiting for.
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) this.net.open.clear(); });
+    page.on('response', (resp) => {
+      const req = resp.request();
+      if (!isQuery(req) || resp.status() !== 200) return;
+      const job = resp.text().then((body) => {
+        for (const r of parseQueryExchange(req.postData() || '', body)) this.queries.set(r.visualId, { ...r, seq: ++this.querySeq });
+      }).catch(() => {}).finally(() => this.net.parsing.delete(job));
+      this.net.parsing.add(job);
+    });
+  }
+
+  /** True while Power BI is fetching data for this tab (or has only just finished). */
+  netBusy() {
+    return this.net.open.size > 0 || Date.now() - this.net.last < 200;
+  }
+
+  /**
+   * The data Power BI last downloaded for a visual, or null. Power BI answers
+   * from its own memory when it returns to a state it has shown before, so this
+   * is only what the visual shows now when nothing has been undone since: the
+   * runner uses it for the first look at each page, not after interactions.
+   */
+  async queryData(v) {
+    if (!v?.visualId) return null;
+    await Promise.all([...this.net.parsing]);
+    return this.queries.get(v.visualId) || null;
   }
 
   // ------------------------------------------------------------------ load
@@ -48,6 +89,29 @@ export class PbiReport {
     await this.waitForReport();
     if (this.cfg.resetToDefaultOnLoad) await this.resetToDefault();
     await this.waitStable();
+    await this.fitViewport();
+  }
+
+  /**
+   * Makes the window as large as the report page when the page is larger
+   * (pages that scroll), so screenshots show all of it. Starts from the
+   * suite's window size on every page.
+   */
+  async fitViewport() {
+    if (this.frame !== this.page.mainFrame()) return false; // embedded: the host page decides the size
+    const base = this.cfg.viewport;
+    const cur = this.page.viewportSize();
+    if (cur && (cur.width !== base.width || cur.height !== base.height)) {
+      await this.page.setViewportSize({ width: base.width, height: base.height });
+      await this.waitStable({ timeout: 15000 });
+    }
+    const o = await this.frame.evaluate(canvasOverflowInPage, { sel: this.sel }).catch(() => null);
+    if (!o || (o.extraW < 8 && o.extraH < 8)) return false;
+    const next = { width: Math.min(base.width + o.extraW, 3840), height: Math.min(base.height + o.extraH, 8000) };
+    this.log('info', `Page is larger than the ${base.width}×${base.height} window: capturing it at ${next.width}×${next.height}`);
+    await this.page.setViewportSize(next);
+    await this.waitStable({ timeout: 15000 });
+    return true;
   }
 
   async waitForReport() {
@@ -99,25 +163,42 @@ export class PbiReport {
     return true;
   }
 
-  /** Waits until no spinners are visible and both DOM and pixels stop changing. */
+  /**
+   * Waits until nothing is loading (no spinners, no data requests in flight)
+   * and both DOM and pixels have stopped changing. When this tab's data
+   * requests can be seen, the pauses are short because a request that is still
+   * running is known; otherwise it waits the longer, fixed times.
+   */
   async waitStable({ timeout = this.cfg.timing.stableTimeoutMs } = {}) {
     const start = Date.now();
-    await sleep(this.cfg.timing.settleMs);
-    let last = null, same = 0;
+    const tracked = this.net.seen > 0;
+    // Time for an action to start its requests (measured: ~130 ms after a click).
+    await sleep(tracked ? Math.min(this.cfg.timing.settleMs, 500) : this.cfg.timing.settleMs);
+    const poll = tracked ? 150 : 350, gap = tracked ? 250 : 450;
+    let last = null, same = 0, quiet = 0;
     while (Date.now() - start < timeout) {
       const s = await this.frame.evaluate(renderSignatureInPage, { sel: this.sel }).catch(() => null);
-      if (s && !s.busy && s.sig === last) {
+      // A request that never reports back must not hold every later wait: when
+      // the page has shown no spinner and no change for 6 s, nothing is loading.
+      if (s && !s.busy && s.sig === last && this.net.open.size) {
+        quiet ||= Date.now();
+        if (Date.now() - quiet > 6000 && Date.now() - this.net.last > 6000) {
+          this.log('debug', `${this.net.open.size} data request(s) never finished; no longer waiting for them`);
+          this.net.open.clear();
+        }
+      } else quiet = 0;
+      if (s && !s.busy && !this.netBusy() && s.sig === last) {
         if (++same >= 2) {
           // DOM settled; confirm pixels are stable too (canvas/WebGL visuals, animations).
           const h1 = await this.canvasHash();
-          await sleep(450);
+          await sleep(gap);
           const h2 = await this.canvasHash();
-          if (h1 && h1 === h2) return true;
+          if (h1 && h1 === h2 && !this.netBusy()) return true;
           same = 0;
         }
       } else same = 0;
       last = s?.sig ?? null;
-      await sleep(350);
+      await sleep(poll);
     }
     this.log('warn', `Render did not fully settle within ${Math.round(timeout / 1000)}s; continuing`);
     return false;
@@ -238,6 +319,7 @@ export class PbiReport {
     const now = await this.currentPageIndex();
     if (now !== target.index) throw new ReportError('NAVIGATION', `Could not navigate to page "${target.name}" (still on #${now + 1})`);
     if (!target.url) target.url = this.page.url();
+    await this.fitViewport();
   }
 
   async waitForPageIndex(index, timeout) {
@@ -277,16 +359,29 @@ export class PbiReport {
     if (this.cfg.resetToDefaultOnLoad) await this.resetToDefault();
     await this.waitStable();
     await this.gotoPage(ref);
+    await this.fitViewport(); // gotoPage returns early when the report reopened on this page
     // Puts back slicer selections the run set on purpose (aligned / fixed parameters).
     if (this.afterReload) await this.afterReload().catch((e) => this.log('warn', `Could not re-apply slicer selections after reload: ${e.message.split('\n')[0]}`));
   }
 
   /**
    * Returns the page to its baseline state. Tries the cheap path first; if the
-   * canvas still differs from the baseline, reloads.
+   * page still differs from the baseline, resets or reloads.
+   *
+   * "Same as the baseline" means the screenshot matches AND, when `sameState`
+   * is given, the page's values do (sameState(extraction) → boolean). Pixels
+   * alone are not enough: a slicer value left selected can change one card and
+   * a few numbers, well under the pixel tolerance, and would then leak into
+   * the next check as a false difference.
    */
-  async restore(ref, baseline, softUndo) {
+  async restore(ref, baseline, softUndo, sameState = null) {
     const tol = Math.max(this.cfg.thresholds.maxDiffRatio, 0.0005);
+    // Pixel-identical is the baseline, whatever the DOM says (Power BI can leave
+    // a chart's accessibility labels stale after a highlight is cleared).
+    const atBaseline = async (shot) => {
+      const r = quickRatio(shot, baseline, this.cfg.thresholds.pixelThreshold);
+      return r === 0 || (r <= tol && (!sameState || sameState(await this.extract())));
+    };
     await this.closePopups();
     await this.dismissOverlays();
     if (softUndo) {
@@ -294,7 +389,7 @@ export class PbiReport {
     }
     if ((await this.currentPageIndex()) !== ref.index) await this.gotoPage(ref).catch(() => {});
     let shot = await this.screenshotCanvas();
-    if (quickRatio(shot, baseline, this.cfg.thresholds.pixelThreshold) <= tol) return { reloaded: false };
+    if (await atBaseline(shot)) return { reloaded: false };
     // "Reset to default" puts slicers, filters, drill and sort back in a few
     // seconds; a reload opens the whole report again (often well over a minute).
     if (this.cfg.resetToDefaultOnLoad && await this.resetToDefault()) {
@@ -302,13 +397,13 @@ export class PbiReport {
       if ((await this.currentPageIndex()) !== ref.index) await this.gotoPage(ref).catch(() => {});
       if (this.afterReload) await this.afterReload().catch((e) => this.log('warn', `Could not re-apply slicer selections after reset: ${e.message.split('\n')[0]}`));
       shot = await this.screenshotCanvas();
-      if (quickRatio(shot, baseline, this.cfg.thresholds.pixelThreshold) <= tol) { this.resets++; return { reloaded: false, reset: true }; }
+      if (await atBaseline(shot)) { this.resets++; return { reloaded: false, reset: true }; }
     }
     await this.reloadToPage(ref);
     shot = await this.screenshotCanvas();
     const r = quickRatio(shot, baseline, this.cfg.thresholds.pixelThreshold);
-    if (r > tol) {
-      this.log('warn', `Page "${ref.name}" differs from its initial state after reload (${(r * 100).toFixed(2)}%): using this state as the new starting point, so later checks don't reload again`);
+    if (r > tol || (r > 0 && sameState && !sameState(await this.extract()))) {
+      this.log('warn', `Page "${ref.name}" differs from its initial state after reload (${(r * 100).toFixed(2)}% of pixels): using this state as the new starting point, so later checks don't reload again`);
       return { reloaded: true, drifted: true, shot };
     }
     return { reloaded: true };
@@ -335,7 +430,20 @@ export class PbiReport {
 
   async hoverVisual(v) {
     await this.page.mouse.move(v.pageBox.x + v.pageBox.w / 2, v.pageBox.y + Math.min(v.pageBox.h / 2, 40));
-    await sleep(500);
+    await sleep(350);
+  }
+
+  /** Polls `read` until it returns the same non-empty answer twice in a row, or time runs out. */
+  async untilSteady(read, { timeout = 1500, every = 120, empty = (x) => !x } = {}) {
+    const end = Date.now() + timeout;
+    let prev = null, cur = null;
+    for (;;) {
+      cur = await read();
+      if (!empty(cur) && prev !== null && JSON.stringify(cur) === JSON.stringify(prev)) return cur;
+      prev = empty(cur) ? null : cur;
+      if (Date.now() >= end) return cur;
+      await sleep(every);
+    }
   }
 
   async headerButtons(v) {
@@ -366,8 +474,8 @@ export class PbiReport {
   async contextMenuAt(x, y) {
     await this.page.mouse.move(x, y);
     await this.page.mouse.click(x, y, { button: 'right' });
-    await sleep(600);
-    return this.frame.evaluate(contextMenuInPage, { selector: this.sel.contextMenuItem });
+    // The menu opens within a moment; wait for its items rather than a fixed pause.
+    return this.untilSteady(() => this.frame.evaluate(contextMenuInPage, { selector: this.sel.contextMenuItem }), { timeout: 1200, empty: (m) => !m.length });
   }
 
   async clickMenuItem(pattern) {
@@ -410,8 +518,9 @@ export class PbiReport {
     return null;
   }
 
-  async tooltip() {
-    const t = await this.frame.evaluate(tooltipInPage, { selectors: asList(this.sel.tooltip) });
+  /** The tooltip on screen, once it has appeared and stopped changing (null if none shows up). */
+  async tooltip({ timeout = 1800 } = {}) {
+    const t = await this.untilSteady(() => this.frame.evaluate(tooltipInPage, { selectors: asList(this.sel.tooltip) }), { timeout, every: 150 });
     if (t) t.box = { x: t.box.x + this.offset.x, y: t.box.y + this.offset.y, w: t.box.w, h: t.box.h };
     return t;
   }
@@ -427,6 +536,13 @@ export class PbiReport {
     for (let i = 0; i < 3 && (await backdrop.count().catch(() => 0)); i++) {
       await backdrop.last().click({ force: true, timeout: 2000 }).catch(() => {});
       await sleep(200);
+    }
+    // A dropdown slicer ignores Escape once the keyboard focus has left its list
+    // (after scrolling it): it says it is still open, so close it at its own toggle.
+    const open = this.frame.locator(`:is(${this.sel.slicerDropdown})[aria-expanded="true"]`);
+    for (let i = 0; i < 3 && (await open.count().catch(() => 0)); i++) {
+      await open.first().click({ timeout: 2000 }).catch(() => {});
+      await sleep(250);
     }
   }
 
@@ -453,14 +569,30 @@ export class PbiReport {
   }
 
   async selectSlicerItem(v, label) {
-    const hit = await this.findSlicerItem(v, label);
-    if (!hit) {
-      await this.dismissOverlays();
-      return false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const hit = await this.findSlicerItem(v, label);
+      if (!hit) {
+        await this.dismissOverlays();
+        return false;
+      }
+      if (!(await this.clickSlicerHit(hit))) { await sleep(300); continue; } // the list redrew: look again
+      await sleep(300);
+      if (v.slicer?.hasDropdown) await this.dismissOverlays();
+      return true;
     }
-    await hit.scope.nth(hit.idx).click({ timeout: this.cfg.timing.actionTimeoutMs });
-    await sleep(300);
-    if (v.slicer?.hasDropdown) await this.page.keyboard.press('Escape').catch(() => {});
+    await this.dismissOverlays();
+    throw new Error(`The list of slicer "${v.title || ''}" kept changing while selecting "${label}"`);
+  }
+
+  /**
+   * Clicks the row found by findSlicerItem, but only if it still holds that
+   * value. Long lists reuse their rows as they scroll, so "the 4th row" can be
+   * a different value a moment later; clicking it would select the wrong one.
+   */
+  async clickSlicerHit(hit, opts = {}) {
+    const now = await hit.el.evaluate((e) => (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim(), null, { timeout: 2000 }).catch(() => null);
+    if (now === null || norm(now) !== norm(hit.label)) return false;
+    await hit.el.click({ timeout: this.cfg.timing.actionTimeoutMs, ...opts });
     return true;
   }
 
@@ -527,12 +659,18 @@ export class PbiReport {
       : this.frame.locator(this.sel.visualContainer).nth(v.domIndex).locator(this.sel.slicerItem);
     await this.waitForItems(scope, 4000);
     const look = async () => {
-      const info = await scope.evaluateAll((els) => els.map((e) => ({
-        label: (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim(),
-        checked: e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true',
-      })));
-      const idx = info.findIndex((i) => norm(i.label) === norm(label));
-      return idx < 0 ? null : { scope, idx, checked: info[idx].checked, labels: info.map((i) => i.label) };
+      // The matching row is marked in the page so the click goes to that element, not to a position in the list.
+      const token = `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      const info = await scope.evaluateAll((els, { want, mark }) => {
+        const text = (e) => (e.getAttribute('title') || e.textContent || '').replace(/\s+/g, ' ').trim();
+        const labels = els.map(text);
+        const idx = labels.findIndex((l) => l.toLowerCase() === want);
+        if (idx < 0) return { idx, labels };
+        for (const old of document.querySelectorAll('[data-pbiv-hit]')) old.removeAttribute('data-pbiv-hit');
+        els[idx].setAttribute('data-pbiv-hit', mark);
+        return { idx, labels, checked: els[idx].getAttribute('aria-checked') === 'true' || els[idx].getAttribute('aria-selected') === 'true' };
+      }, { want: norm(label), mark: token });
+      return info.idx < 0 ? null : { scope, idx: info.idx, checked: info.checked, labels: info.labels, label, el: this.frame.locator(`[data-pbiv-hit="${token}"]`) };
     };
     let hit = await look();
     if (hit) return hit;
@@ -547,13 +685,42 @@ export class PbiReport {
       await search.fill('', { timeout: 5000 }).catch(() => {});
       await sleep(600);
     }
-    // Scroll through the list, looking at each screenful.
+    // Scroll through the list, looking at each screenful: from the top, since a
+    // list that was scrolled before reopens where it was left.
+    const toTop = await scope.last().evaluate((e) => {
+      let depth = 0;
+      for (let n = e.parentElement; n && depth < 12; n = n.parentElement, depth++) {
+        if (n.scrollHeight <= n.clientHeight + 4 || !/auto|scroll|overlay/.test(getComputedStyle(n).overflowY)) continue;
+        if (n.scrollTop > 0) { n.scrollTop = 0; return true; }
+      }
+      return false;
+    }).catch(() => false);
+    if (toTop) {
+      await sleep(350);
+      hit = await look();
+      if (hit) return hit;
+    }
     let prev = '';
-    for (let i = 0; i < 25; i++) {
-      const box = await scope.last().boundingBox().catch(() => null);
-      if (!box) break;
-      await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await this.page.mouse.wheel(0, Math.max(120, box.height * 4));
+    for (let i = 0; i < 60; i++) {
+      // Scroll the list itself (its own scroll container); the mouse wheel is the
+      // fallback, over a row in the middle (the last rendered row can be out of view).
+      const moved = await scope.last().evaluate((e) => {
+        let depth = 0;
+        for (let n = e.parentElement; n && depth < 12; n = n.parentElement, depth++) {
+          if (n.scrollHeight <= n.clientHeight + 4 || !/auto|scroll|overlay/.test(getComputedStyle(n).overflowY)) continue;
+          const before = n.scrollTop;
+          n.scrollTop = before + Math.max(60, n.clientHeight * 0.8);
+          if (n.scrollTop !== before) return true;
+        }
+        return false;
+      }).catch(() => false);
+      if (!moved) {
+        const count = await scope.count().catch(() => 0);
+        const box = count ? await scope.nth(Math.floor(count / 2)).boundingBox().catch(() => null) : null;
+        if (!box) break;
+        await this.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await this.page.mouse.wheel(0, Math.max(120, box.height * 4));
+      }
       await sleep(350);
       hit = await look();
       if (hit) return hit;
@@ -578,7 +745,14 @@ export class PbiReport {
       const hit = await this.findSlicerItem(v, want);
       if (!hit) { missing.push(want); continue; }
       if (hit.checked) { clicked++; continue; } // single-select slicers keep one value
-      await hit.scope.nth(hit.idx).click({ timeout: this.cfg.timing.actionTimeoutMs, modifiers: clicked ? ['ControlOrMeta'] : [] });
+      let done = await this.clickSlicerHit(hit, { modifiers: clicked ? ['ControlOrMeta'] : [] });
+      for (let again = 0; !done && again < 2; again++) { // the list redrew between finding and clicking
+        await sleep(300);
+        const h2 = await this.findSlicerItem(v, want);
+        if (!h2) break;
+        done = h2.checked || await this.clickSlicerHit(h2, { modifiers: clicked ? ['ControlOrMeta'] : [] });
+      }
+      if (!done) { missing.push(want); continue; }
       clicked++;
       await sleep(300);
     }
@@ -587,10 +761,44 @@ export class PbiReport {
     return { missing };
   }
 
+  /**
+   * Types values into a range/date slicer's boxes (from, to). The runner reads
+   * the slicer again afterwards to see whether Power BI accepted them.
+   */
+  async setSlicerRange(v, values) {
+    const inputs = this.frame.locator(this.sel.visualContainer).nth(v.domIndex).locator(this.sel.slicerRangeInputs);
+    const n = Math.min(await inputs.count(), values.length);
+    for (let i = 0; i < n; i++) {
+      const input = inputs.nth(i);
+      if (((await input.inputValue().catch(() => '')) || '').trim() === values[i]) continue;
+      await input.fill(values[i], { timeout: this.cfg.timing.actionTimeoutMs });
+      await input.press('Enter').catch(() => {});
+      await this.waitStable({ timeout: 20000 });
+    }
+    await this.parkMouse();
+  }
+
+  /**
+   * Clears a slicer with its eraser button and checks that it took: the button
+   * only shows while the mouse is over the slicer, and a click that misses it
+   * leaves the selection in place. Returns false when the slicer still shows
+   * a selection (some slicers must always have one).
+   */
   async clearSlicer(v) {
     const clr = this.frame.locator(this.sel.visualContainer).nth(v.domIndex).locator(this.sel.slicerClear).first();
-    await this.hoverVisual(v);
-    if (await clr.count()) await clr.click({ force: true, timeout: 5000 }).catch(() => clr.dispatchEvent('click'));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt) { await this.parkMouse(); await sleep(200); }
+      await this.hoverVisual(v);
+      if (!(await clr.count())) return false;
+      if (attempt) await clr.click({ timeout: 3000 }).catch(() => clr.dispatchEvent('click').catch(() => {}));
+      else await clr.click({ force: true, timeout: 5000 }).catch(() => clr.dispatchEvent('click'));
+      await sleep(400);
+      const now = (await this.extract({ onlyIndex: v.domIndex }).catch(() => null))?.visuals[0];
+      if (!now?.slicer) return true; // can't read it: as before
+      const cleared = now.slicer.hasDropdown ? dropdownText(now)?.length === 0 : !now.slicer.items.some((i) => i.checked && !/^select all$/i.test(i.label));
+      if (cleared) return true;
+    }
+    return false;
   }
 
   async expandMatrixRows(v, n) {

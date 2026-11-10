@@ -97,6 +97,7 @@ function interactionSummary(r) {
   if (d.note) return d.note;
   if (d.dataDiffs?.length) return `${d.dataDiffs.length} visual(s) show different data afterwards`;
   if (d.data && !d.data.equal) return `Data differs (+${d.data.added ?? 0} / −${d.data.removed ?? 0} lines)`;
+  if (d.query && !d.query.equal) return `Data behind the visual differs (+${d.query.added ?? 0} / −${d.query.removed ?? 0} rows)`;
   if (r.diff_ratio) return `${(r.diff_ratio * 100).toFixed(2)}% of pixels differ`;
   return r.status;
 }
@@ -139,7 +140,8 @@ export function runChanges(runId) {
     const layout = (structure?.details?.issues || []).map((i) => ({ change: LAYOUT_LABEL[i.kind] || i.kind.replace(/_/g, ' '), visual: i.visual, a: i.a ?? null, b: i.b ?? null }));
     const visualRows = rows.filter((r) => r.scenario === 'visual');
     const values = visualRows
-      .map((r) => ({ resultId: r.id, visual: r.title, status: r.status, changes: valueChanges(r.details?.data) }))
+      // What is on screen first; when that matches, the unrounded data behind the visual.
+      .map((r) => { const ch = valueChanges(r.details?.data); return { resultId: r.id, visual: r.title, status: r.status, changes: ch.length ? ch : valueChanges(r.details?.query) }; })
       .filter((v) => v.changes.length);
     const visualsChanged = visualRows.filter((r) => PROBLEM.has(r.status) || r.status === 'accepted')
       .map((r) => ({ resultId: r.id, title: r.title, status: r.status, pixel: r.diff_ratio, missingIn: r.details?.missingIn || null, accepted: r.details?.accepted || null }));

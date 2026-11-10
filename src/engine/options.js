@@ -28,6 +28,7 @@ export const SuiteConfigSchema = z.object({
     crossFilter: z.boolean().default(true),    // click data points, compare cross-filtering
     tooltips: z.boolean().default(true),       // hover data points, compare tooltip content
     model: z.boolean().default(true),          // compare the data model: tables, columns, measures (DAX), relationships, roles
+    queryData: z.boolean().default(true),      // compare the data Power BI downloads for each visual (all rows, full precision)
     // Before comparing a page, set B's slicers to the values selected in A, so values are compared
     // on the same parameters. A different default selection is reported on its own.
     alignSelections: z.boolean().default(true),
@@ -52,6 +53,9 @@ export const SuiteConfigSchema = z.object({
     positionTolerancePx: z.number().min(0).max(200).default(4),
     numericTolerance: z.number().min(0).default(0),            // relative tolerance for numbers in data
     shiftTolerancePx: z.number().int().min(0).max(3).default(1), // ignore sub-pixel layout jitter
+    // Still screenshots: this many differing pixels in one connected area is a difference,
+    // however small a share of the image it is (one changed digit or marker). 0 = off.
+    minRegionPixels: z.number().int().min(0).max(100000).default(40),
   }).prefault({}),
   ignore: z.object({
     visualTypes: z.array(z.string()).default(['shape', 'image', 'basicShape']),

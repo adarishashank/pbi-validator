@@ -252,6 +252,14 @@ export async function executeRun(ctx) {
 const isSlicerVisual = (sel, v) => !!v.slicer || sel.types.slicer.some((t) => t.toLowerCase() === v.type.toLowerCase());
 const sameSet = (a, b) => a.length === b.length && a.every((x) => b.some((y) => y.toLowerCase() === x.toLowerCase()));
 const showSel = (l) => (l.length ? l.join(', ') : 'All');
+/** The values a slicer shows as selected, read without clicking; null when it can't be told. */
+function shownSelection(v) {
+  if (!v.slicer || v.slicer.hasRange) return null;
+  if (v.slicer.hasDropdown) return dropdownText(v);
+  const items = v.slicer.items || [];
+  if (!items.length || items.some((i) => i.checked && /^select all$/i.test(i.label))) return null;
+  return items.filter((i) => i.checked && i.label).map((i) => i.label);
+}
 
 /**
  * Puts both reports on the same parameters before a page is compared:
@@ -261,6 +269,71 @@ const showSel = (l) => (l.length ? l.join(', ') : 'All');
  * the slicer. Returns what was applied (shown with the page render).
  */
 async function alignSelections(env) {
+  const applied = await alignListSelections(env);
+  return [...applied, ...await alignRanges(env)];
+}
+
+/**
+ * Range and date slicers (from – to boxes): when B opens on a different range
+ * than A, types A's range into B and checks that Power BI took it. Either way
+ * the different default is recorded, with whether the page was then compared
+ * on the same range.
+ */
+async function alignRanges(env) {
+  const { ctx, cfg, sel, S, pageName, compare, state, base, refresh, record, ignoredTitle } = env;
+  if (!compare || !cfg.scenarios.alignSelections) return [];
+  const log = ctx.log;
+  const show = (r) => r.join(' – ') || '(empty)';
+  const same = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]);
+  const out = [];
+  const pairs = state.match.pairs.filter((p) => isSlicerVisual(sel, p.a) && p.a.slicer?.hasRange && p.b?.slicer?.hasRange && !ignoredTitle(p.a));
+  for (const p0 of pairs) {
+    const ra = p0.a.slicer.range || [], rb = p0.b.slicer.range || [];
+    if (!ra.length || ra.length !== rb.length || same(ra, rb)) continue;
+    const title = p0.a.title || visualLabel(p0.a);
+    const shots = { a: cropBuffer(base.A, p0.a.box), b: cropBuffer(base.B, p0.b.box) };
+    let ok = false, why = '';
+    try {
+      await S.B.report.setSlicerRange(p0.b, ra);
+      base.B = await S.B.report.screenshotCanvas();
+      await refresh();
+      const now = state.byKey.get(p0.key)?.b?.slicer?.range || [];
+      ok = same(now, ra);
+      if (!ok) why = `B still shows ${show(now)}`;
+    } catch (e) {
+      why = `B could not be set (${e.message.split('\n')[0].slice(0, 100)})`;
+      await refresh().catch(() => {});
+    }
+    if (ok) {
+      // A reload puts B back on its own range: set it again.
+      const prev = S.B.report.afterReload;
+      const wanted = (p0.b.title || '').toLowerCase();
+      S.B.report.afterReload = async () => {
+        if (prev) await prev();
+        const ex = await S.B.report.extract();
+        const v = ex.visuals.find((x) => isSlicerVisual(sel, x) && x.slicer?.hasRange && (x.title || '').toLowerCase() === wanted);
+        if (v) await S.B.report.setSlicerRange(v, ra);
+      };
+    }
+    out.push({ slicer: title, why: 'aligned', values: [show(ra)], before: { A: [show(ra)], B: [show(rb)] }, changed: ok ? ['B'] : [], missing: ok ? {} : { B: [`(${why})`] } });
+    log('info', `Range slicer "${title}": A shows ${show(ra)}, B showed ${show(rb)} — ${ok ? 'B set to the same range before comparing' : why}`);
+    if (!record) continue;
+    await ctx.record({
+      page: pageName, scenario: 'selections', target: p0.key,
+      title: `"${title}" opens on different ranges: ${show(ra)} (A) vs ${show(rb)} (B)`,
+      status: 'diff',
+      images: shots,
+      details: {
+        slicer: title, defaultA: [show(ra)], defaultB: [show(rb)], applied: ok,
+        note: ok ? `B was set to ${show(ra)} before the page was compared, so the other checks on this page compare the same range`
+          : `${why}: the rest of this page was compared with different ranges`,
+      },
+    });
+  }
+  return out;
+}
+
+async function alignListSelections(env) {
   const { ctx, cfg, sel, sides, S, both, pageName, compare, state, base, refresh, record, ignoredTitle } = env;
   const log = ctx.log;
   const params = (cfg.parameters || []).filter((p) => !p.page || anyMatch([p.page], pageName));
@@ -404,7 +477,7 @@ function pageFilters({ sel, compare, state, applied }) {
     if (!v) return null;
     const known = state.selected?.get(p.key)?.[side];
     if (known) return showSel(known);
-    if (v.slicer?.hasRange) return text(v);
+    if (v.slicer?.hasRange) return v.slicer.range?.some(Boolean) ? v.slicer.range.join(' – ') : text(v);
     if (v.slicer?.hasDropdown) { const d = dropdownText(v); return d ? showSel(d) : text(v); }
     const items = v.slicer?.items || [];
     if (!items.length) return text(v);
@@ -451,7 +524,12 @@ async function processPage(env) {
       state.match.onlyA = [];
     }
     state.byKey = new Map(state.match.pairs.map((p) => [p.key, p]));
+    // What each side shows now: the state every interaction must be undone to.
+    state.sig = Object.fromEntries(sides.map((s) => [s.name, stateSignature(state.ex[s.name])]));
   };
+  // The values and selections a page shows, as one string (ignored visuals and ignored text left out).
+  const stateSignature = (ex) => JSON.stringify((ex?.visuals || []).filter((v) => !ignoredTitle(v) && !ignoredType(v))
+    .map((v) => [v.type, v.title, visualDataLines(v).map(normalize), v.slicer ? [v.slicer.items.filter((i) => i.checked).map((i) => i.label), v.slicer.range] : 0]));
   await refresh();
 
   const recordStatic = env.phase !== 'interactive';
@@ -475,7 +553,7 @@ async function processPage(env) {
   if (cfg.scenarios.pageRender && recordStatic) {
     await ctx.record(imageResult({
       page: pageName, scenario: 'page_render', target: 'page', title: `Page render · ${pageName}`,
-      a: base.A, b: base.B, compare, cfg, details: { renderMs, canvasA: state.ex.A.canvas, canvasB: state.ex.B?.canvas, filters: state.filters, ...(state.selections.length ? { selections: state.selections } : {}) },
+      a: base.A, b: base.B, compare, cfg, solid: true, details: { renderMs, canvasA: state.ex.A.canvas, canvasB: state.ex.B?.canvas, filters: state.filters, ...(state.selections.length ? { selections: state.selections } : {}) },
     }));
   }
 
@@ -502,8 +580,23 @@ async function processPage(env) {
       const a = cropBuffer(base.A, p.a.box), b = p.b ? cropBuffer(base.B, p.b.box) : null;
       if (!a) continue;
       const data = compare ? diffLines(visualDataLines(p.a), visualDataLines(p.b), { numericTolerance: cfg.thresholds.numericTolerance, normalize }) : null;
-      const res = imageResult({ page: pageName, scenario: 'visual', target: p.key, title: visualLabel(p.a), a, b, compare, cfg, details: { type: p.a.type, matchedBy: p.how, data, linesA: compare ? undefined : visualDataLines(p.a).slice(0, 200), sample: compare ? visualDataLines(p.b).slice(0, 40) : undefined } });
+      // The data Power BI downloaded for this visual: every row of the first
+      // data window at full precision, not only what fits on screen.
+      let query = null;
+      if (compare && p.b && cfg.scenarios.queryData) {
+        const [qa, qb] = await Promise.all([S.A.report.queryData(p.a), S.B.report.queryData(p.b)]);
+        if (qa && qb && !qa.error && !qb.error) {
+          query = { ...diffLines(qa.lines, qb.lines, { numericTolerance: cfg.thresholds.numericTolerance, normalize, cap: 5000 }), rowsA: qa.rows, rowsB: qb.rows, complete: !!(qa.complete && qb.complete) };
+        }
+      }
+      // Text read from the screen stops at what is drawn (and at the reading limits).
+      const partial = !!(data?.truncated || p.a.capped || p.b?.capped);
+      const res = imageResult({ page: pageName, scenario: 'visual', target: p.key, title: visualLabel(p.a), a, b, compare, cfg, solid: true, details: { type: p.a.type, matchedBy: p.how, data, ...(query ? { query } : {}), ...(partial ? { partial: true } : {}), linesA: compare ? undefined : visualDataLines(p.a).slice(0, 200), sample: compare ? visualDataLines(p.b).slice(0, 40) : undefined } });
       if (data && !data.equal) res.status = 'diff';
+      if (query && !query.equal) {
+        res.status = 'diff';
+        if (data?.equal) res.details.note = 'The text on screen is the same, but the data behind this visual differs (values rounded on screen, or rows not shown)';
+      }
       if (p.a.error || p.b?.error) { res.status = 'fail'; res.details.error = { A: p.a.error, B: p.b?.error }; }
       await ctx.record(res);
     }
@@ -529,8 +622,22 @@ async function processPage(env) {
   const pairsWhere = (pred) => state.match.pairs.filter((p) => pred(p.a) && !ignoredTitle(p.a));
   const isChart = (v) => v.points.length > 0 && !v.slicer && !isType(v, 'slicer');
 
+  /**
+   * The data point to act on in each report: A's first point and the point
+   * with the same label in B, so both sides click the same member even when
+   * their order differs. Falls back to B's first point (same: false).
+   */
+  const samePoint = async (p, wanted = null) => {
+    const pts = {};
+    await both(async (s) => { pts[s.name] = await s.report.dataPoints(s.name === 'A' ? p.a : p.b, 50); });
+    const first = (wanted !== null && pts.A.find((x) => x.label === wanted)) || pts.A[0] || null;
+    const pick = { A: first };
+    if (pts.B) pick.B = (first && pts.B.find((x) => x.label === first.label)) || pts.B[0] || null;
+    return { pick, label: first?.label ?? null, same: !pick.B || !first || pick.B.label === first.label };
+  };
+
   const restoreAll = async (undo) => {
-    const r = await Promise.all(sides.map((s) => s.report.restore(ref[s.name], base[s.name], undo ? () => undo(s) : null)));
+    const r = await Promise.all(sides.map((s) => s.report.restore(ref[s.name], base[s.name], undo ? () => undo(s) : null, (ex) => stateSignature(ex) === state.sig[s.name])));
     // A page that never returns to its first screenshot (live data, animations,
     // persisted filters) would otherwise be reloaded after every check.
     r.forEach((x, i) => { if (x.drifted && x.shot) base[sides[i].name] = x.shot; });
@@ -635,7 +742,7 @@ async function processPage(env) {
               await s.report.clickVisual(v);
             }
           });
-          await sleep(1200);
+          await sleep(600);
           const outcome = {};
           await both(async (s) => {
             await s.report.waitStable();
@@ -685,7 +792,7 @@ async function processPage(env) {
         await S.A.report.dismissOverlays();
         continue;
       } finally {
-        await S.A.report.page.keyboard.press('Escape').catch(() => {});
+        await S.A.report.dismissOverlays();
         await sleep(300);
       }
       const candidates = labels.filter((l) => l && !/^(select all|all)$/i.test(l));
@@ -702,6 +809,20 @@ async function processPage(env) {
           await both(async (s) => { found[s.name] = await s.report.selectSlicerItem(s.name === 'A' ? p.a : p.b, label); });
           if (!found.A) throw new Error(`Value "${label}" not found in slicer (A)`);
           const cap = await capturePage();
+          // Both reports were told to choose the same value. If their slicers now
+          // show different ones, the click went wrong: that is not a difference
+          // between the reports, so the check is tried again instead of reported.
+          if (compare && found.B) {
+            const shown = {};
+            for (const s of sides) {
+              const before = s.name === 'A' ? p.a : p.b;
+              const now = cap[s.name].ex.visuals.find((x) => x.domIndex === before.domIndex && x.type === before.type);
+              shown[s.name] = now ? shownSelection(now) : null;
+            }
+            if (shown.A?.length && shown.B?.length && !sameSet(shown.A, shown.B)) {
+              throw new Error(`After choosing "${label}", the slicer shows ${showSel(shown.A)} in A but ${showSel(shown.B)} in B`);
+            }
+          }
           const res = pageVerdict(cap, { value: label, valueFound: found });
           if (compare && !found.B) { res.status = 'fail'; res.details.note = `Value "${label}" is not available in report B's slicer`; }
           return res;
@@ -709,7 +830,8 @@ async function processPage(env) {
           const p = state.byKey.get(p0.key);
           if (!p) return null;
           const v = s.name === 'A' ? p.a : p.b;
-          const known = state.selected?.get(p0.key)?.[s.name];
+          // Back to what the slicer showed before: the aligned / default values, or cleared.
+          const known = state.selected?.get(p0.key)?.[s.name] ?? shownSelection(v);
           return known?.length ? s.report.setSlicerSelection(v, known) : s.report.clearSlicer(v);
         } });
       }
@@ -769,9 +891,12 @@ async function processPage(env) {
             const p = state.byKey.get(p0.key);
             if (!p) return { status: 'skipped', details: { note: 'Visual no longer present' } };
             const ok = {}, point = {};
+            // Both reports drill into the same member: the one chosen for level 1, then A's first at each deeper level.
+            let member = level === 1 ? (op.point ?? null) : null;
+            if (member === null && ['drillDown', 'ctxExpand', 'drillMode'].includes(op.kind)) member = (await S.A.report.dataPoints(p.a, 50))[0]?.label ?? null;
             await both(async (s) => {
               const v = s.name === 'A' ? p.a : p.b;
-              const r = await performDrill(s.report, v, op, sel, { level, point: level === 1 ? op.point : null });
+              const r = await performDrill(s.report, v, op, sel, { level, point: member });
               ok[s.name] = r.ok;
               point[s.name] = r.point;
             });
@@ -790,6 +915,10 @@ async function processPage(env) {
               res.title = `${op.label}${trail.length ? ` › ${trail.map((x) => `"${x}"`).join(' › ')}` : ''} (level ${level}) · ${visualLabel(p0.a)}`;
             }
             if (!ok.B && compare) res.details.note = level === 1 ? res.details.note : `Level ${level} exists only in A: B's hierarchy ends earlier`;
+            if (compare && ok.B && point.A !== undefined && point.B !== undefined && point.A !== point.B) {
+              res.details.pointMismatch = { A: point.A, B: point.B };
+              res.details.note = res.details.note || `"${point.A}" was not found in B at this level, so B drilled into "${point.B}"`;
+            }
             if (ok.B || !compare) { go = true; if (level > 1 && point.A) path.push(point.A); }
             return res;
           }, { undo, restore: false });
@@ -834,7 +963,7 @@ async function processPage(env) {
           if (!ok[s.name]) await s.report.page.keyboard.press('Escape').catch(() => {});
         });
         if (!ok.A) throw new Error(`Drill-through to "${t.page}" could not be executed on A`);
-        await sleep(1200);
+        await sleep(600);
         const cap = await capturePage();
         const res = pageVerdict(cap, { executed: ok, targetPage: t.page, dataPoint: t.point });
         if (compare && !ok.B) { res.status = 'fail'; res.details.note = `Drill-through target "${t.page}" is not available in B`; }
@@ -863,28 +992,31 @@ async function processPage(env) {
   if (cfg.scenarios.crossFilter && cfg.limits.crossFilterPerPage > 0) {
     const charts = pairsWhere(isChart).slice(0, cfg.limits.crossFilterPerPage);
     for (const p0 of charts) {
-      let pointLabel = null;
+      const clicked = {}, clickedAt = {};
       await scenario({ scenario: 'cross_filter', target: p0.key, title: `Cross-filter from ${visualLabel(p0.a)}` }, async () => {
         const p = state.byKey.get(p0.key);
         if (!p) return { status: 'skipped', details: { note: 'Visual no longer present' } };
-        const labels = {};
+        const { pick, same } = await samePoint(p);
+        for (const s of sides) if (!pick[s.name]) throw new Error(`No data points in ${s.name}`);
         await both(async (s) => {
-          const pts = await s.report.dataPoints(s.name === 'A' ? p.a : p.b, 1);
-          if (!pts[0]) throw new Error(`No data points in ${s.name}`);
-          labels[s.name] = pts[0].label;
-          await s.report.clickAt(pts[0].x, pts[0].y);
+          clicked[s.name] = pick[s.name].label;
+          clickedAt[s.name] = { x: pick[s.name].x, y: pick[s.name].y };
+          await s.report.clickAt(pick[s.name].x, pick[s.name].y);
         });
-        pointLabel = labels.A;
         const cap = await capturePage();
-        const res = pageVerdict(cap, { dataPoint: labels });
-        res.title = `Cross-filter: click "${pointLabel}" in ${visualLabel(p.a)}`;
+        const res = pageVerdict(cap, { dataPoint: { ...clicked }, ...(same ? {} : { pointMismatch: true }) });
+        res.title = `Cross-filter: click "${clicked.A}" in ${visualLabel(p.a)}`;
+        if (!same) res.details.note = [res.details.note, `"${clicked.A}" is not a data point of this visual in B, so B's first point ("${clicked.B}") was clicked`].filter(Boolean).join('. ');
         return res;
       }, { undo: async (s) => {
         const p = state.byKey.get(p0.key);
         const v = p && (s.name === 'A' ? p.a : p.b);
-        if (!v) return;
-        const pts = await s.report.dataPoints(v, 1);
-        if (pts[0]) await s.report.clickAt(pts[0].x, pts[0].y);
+        if (!v || clicked[s.name] === undefined) return;
+        // Click the same point again to clear it. A selected point can stop being
+        // listed (or change its label); it is still where it was clicked.
+        const pts = await s.report.dataPoints(v, 50);
+        const pt = pts.find((x) => x.label === clicked[s.name]) || clickedAt[s.name];
+        await s.report.clickAt(pt.x, pt.y);
       } });
     }
   }
@@ -898,17 +1030,18 @@ async function processPage(env) {
         const p = state.byKey.get(p0.key);
         if (!p) return null;
         const tip = {};
+        const { pick, same } = await samePoint(p);
         await both(async (s) => {
-          const pts = await s.report.dataPoints(s.name === 'A' ? p.a : p.b, 1);
-          if (!pts[0]) { tip[s.name] = null; return; }
-          await s.report.page.mouse.move(pts[0].x, pts[0].y, { steps: 4 });
-          await sleep(1100);
+          const pt = pick[s.name];
+          if (!pt) { tip[s.name] = null; return; }
+          await s.report.page.mouse.move(pt.x, pt.y, { steps: 4 });
+          await sleep(250);
           const t = await s.report.tooltip();
           tip[s.name] = t ? { lines: t.lines, shot: await s.report.screenshotBox(t.box, 4) } : null;
           await s.report.parkMouse();
         });
         if (!tip.A) return { status: 'skipped', title: `Tooltip · ${visualLabel(p.a)}`, details: { note: 'No tooltip appeared on hover in A' } };
-        const res = imageResult({ a: tip.A.shot, b: tip.B?.shot, compare, cfg, details: { linesA: tip.A.lines, linesB: tip.B?.lines } });
+        const res = imageResult({ a: tip.A.shot, b: tip.B?.shot, compare, cfg, details: { linesA: tip.A.lines, linesB: tip.B?.lines, dataPoint: { A: pick.A?.label, B: pick.B?.label }, ...(same ? {} : { pointMismatch: true }) } });
         if (compare) {
           if (!tip.B) { res.status = 'fail'; res.details.note = 'Tooltip did not appear in B'; }
           else {
@@ -1025,7 +1158,13 @@ function spread(list, n) {
 }
 
 /** Builds a result with pixel comparison between two optional images. */
-function imageResult({ a, b, compare, cfg, details = {}, ...rest }) {
+/**
+ * `solid` (still screenshots only): a small but connected changed area counts
+ * as a difference even when it is a tiny share of the image. Not used after
+ * interactions, where hover and highlight states leave small areas that differ
+ * between two identical reports.
+ */
+function imageResult({ a, b, compare, cfg, details = {}, solid = false, ...rest }) {
   const res = { ...rest, status: 'pass', images: {}, details };
   if (a) res.images.a = a;
   if (b) res.images.b = b;
@@ -1033,10 +1172,16 @@ function imageResult({ a, b, compare, cfg, details = {}, ...rest }) {
     const d = diffImages(a, b, { threshold: cfg.thresholds.pixelThreshold, shiftTolerancePx: cfg.thresholds.shiftTolerancePx });
     res.diffRatio = d.ratio;
     res.diffPixels = d.diffPixels;
-    res.details.pixel = { ratio: d.ratio, diffPixels: d.diffPixels, regions: d.regions.length, sizeA: d.sizeA, sizeB: d.sizeB, sizeMismatch: d.sizeMismatch };
+    res.details.pixel = { ratio: d.ratio, diffPixels: d.diffPixels, regions: d.regions.length, maxRegionPixels: d.maxRegionPixels, sizeA: d.sizeA, sizeB: d.sizeB, sizeMismatch: d.sizeMismatch };
     if (d.diffPixels > 0) { res.images.diff = d.diffPng; res.images.annotated = d.annotatedPng; }
     const sizeDelta = Math.max(Math.abs(d.sizeA.w - d.sizeB.w), Math.abs(d.sizeA.h - d.sizeB.h));
+    const min = cfg.thresholds.minRegionPixels;
     if (d.ratio > cfg.thresholds.maxDiffRatio || sizeDelta > cfg.thresholds.positionTolerancePx) res.status = 'diff';
+    else if (solid && min > 0 && d.maxRegionPixels >= min) {
+      res.status = 'diff';
+      res.details.pixel.smallChange = true;
+      res.details.note = `A small area differs (${d.maxRegionPixels} pixels in one place): too small for the ${(cfg.thresholds.maxDiffRatio * 100).toFixed(2)}% limit, but a solid change`;
+    }
   } else if (compare && a && !b) {
     res.status = 'missing';
     res.details.missingIn = 'B';

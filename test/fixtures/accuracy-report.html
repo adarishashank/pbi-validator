@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Accuracy test report</title>
+<!--
+  One-page test double for the accuracy checks (test/accuracy.test.js). Like
+  Power BI, each visual carries its ID in the page and downloads its data with
+  a POST to /querydata. Differences are switched on one at a time with ?diff=:
+    round  the card shows "1.2M" in both reports, the value behind it differs
+    rows   the table shows the same 3 rows, a row further down differs
+    dot    a few pixels of the big card differ (tiny share of the image)
+    order  the chart's data points are in the opposite order
+    labels the chart has one "5" label instead of two
+  ?from=YYYY-MM-DD sets the date slicer's start; ?lock=1 makes it ignore typing;
+  ?tall=1 makes the page taller than the window (it scrolls); ?sticky=1 keeps a
+  clicked data point selected when it is clicked again.
+-->
+<style>
+  body { margin: 0; font: 13px Arial, sans-serif; background: #eaeaea; }
+  #scroll { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow-y: auto; }
+  [data-testid="display-area"] { position: relative; margin: 10px; width: 1280px; height: 700px; background: #fff; }
+  [data-testid="visual-container"] { position: absolute; box-sizing: border-box; border: 1px solid #ccc; background: #fff; }
+  .visualContainer { position: relative; width: 100%; height: 100%; }
+  [data-testid="visual-title"] { font-weight: bold; padding: 4px 6px; }
+  .visual { position: absolute; left: 0; right: 0; top: 24px; bottom: 0; }
+  .big { font-size: 30px; padding: 8px; }
+  [role="grid"] div[role="row"] { display: flex; }
+  [role="grid"] div[role="row"] > div { width: 120px; padding: 2px 4px; }
+</style>
+</head>
+<body>
+<div id="scroll"><div data-testid="display-area" id="canvas"></div></div>
+<script>
+const QS = new URLSearchParams(location.search);
+const DIFF = new Set((QS.get('diff') || '').split(',').filter(Boolean));
+const st = { from: QS.get('from') || '2024-01-01', to: '2024-12-31', picked: null };
+const ID = { card: 'c0ffee00000000000001', table: 'c0ffee00000000000002', chart: 'c0ffee00000000000003' };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function vc({ id, type, role, title, x, y, w, h, body }) {
+  return `<visual-container><div data-testid="visual-container" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px">
+    <div class="visualContainer" role="group" aria-roledescription="${role}" aria-label="${esc(title)}">
+      ${id ? `<p id="visualsEnterHint-${id}" style="display:none">Press Ctrl+Right</p>` : ''}
+      <div data-testid="visual-title">${esc(title)}</div>
+      <div data-testid="visual-content-desc" class="visual visual-${type}">${body}</div>
+    </div></div></visual-container>`;
+}
+
+function render() {
+  const pts = [['North', 100], ['South', 80]];
+  if (DIFF.has('order')) pts.reverse();
+  const labels = DIFF.has('labels') ? [5] : [5, 5];
+  let h = '';
+  h += vc({ id: ID.card, type: 'card', role: 'Card', title: 'Revenue', x: 10, y: 10, w: 600, h: 300,
+    body: `<div class="big">1.2M</div><div style="position:absolute;left:400px;top:150px;width:8px;height:8px;background:${DIFF.has('dot') ? '#000' : '#fff'}"></div>` });
+  h += vc({ id: ID.table, type: 'tableEx', role: 'Table', title: 'Orders', x: 620, y: 10, w: 400, h: 150,
+    body: `<div role="grid">${[['Region', 'Orders'], ['North', 12], ['South', 9]].map((r) => `<div role="row">${r.map((c) => `<div role="gridcell">${c}</div>`).join('')}</div>`).join('')}</div>` });
+  h += vc({ id: ID.chart, type: 'clusteredColumnChart', role: 'Clustered column chart', title: 'Sales by Region', x: 620, y: 170, w: 400, h: 240,
+    body: `<svg width="380" height="200">${pts.map(([k, v], i) => `<rect class="bar" role="option" aria-label="${k}" x="${20 + i * 80}" y="${180 - v}" width="50" height="${v}" fill="#3a7"></rect>`).join('')}
+      ${labels.map((l, i) => `<text x="${250 + i * 40}" y="40">${l}</text>`).join('')}</svg>` });
+  h += vc({ type: 'card', role: 'Card', title: 'Selected', x: 10, y: 320, w: 300, h: 90, body: `<div class="big">${esc(st.picked || 'none')}</div>` });
+  h += vc({ type: 'slicer', role: 'Slicer', title: 'Order date', x: 320, y: 320, w: 290, h: 90,
+    body: `<div class="date-slicer"><input class="date-slicer-input" value="${esc(st.from)}"><input class="date-slicer-input" value="${esc(st.to)}"></div>` });
+  h += vc({ type: 'card', role: 'Card', title: 'Period', x: 10, y: 420, w: 600, h: 90, body: `<div class="big">${esc(st.from)} to ${esc(st.to)}</div>` });
+  if (QS.has('tall')) h += vc({ type: 'card', role: 'Card', title: 'Footer total', x: 10, y: 1400, w: 600, h: 90, body: '<div class="big">999</div>' });
+  const c = document.getElementById('canvas');
+  if (QS.has('tall')) c.style.height = '1500px';
+  c.innerHTML = h;
+}
+
+document.addEventListener('click', (e) => {
+  const bar = e.target.closest('rect.bar');
+  if (!bar) return;
+  const k = bar.getAttribute('aria-label');
+  // ?sticky=1: a second click does not clear the selection (an undo that fails).
+  st.picked = st.picked === k && !QS.has('sticky') ? null : k;
+  render();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !e.target.matches('.date-slicer-input')) return;
+  // A locked slicer refuses the typed value and shows its own again.
+  if (!QS.has('lock')) [st.from, st.to] = [...document.querySelectorAll('.date-slicer-input')].map((i) => i.value);
+  render();
+});
+
+render();
+// Each visual downloads its data, as Power BI does.
+fetch('/querydata?synchronous=true', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ version: '1.0.0', diff: [...DIFF], queries: [ID.card, ID.table, ID.chart].map((VisualId) => ({ Query: {}, ApplicationContext: { DatasetId: 'd', Sources: [{ ReportId: 'r', VisualId }] } })) }),
+}).catch(() => {});
+</script>
+</body>
+</html>

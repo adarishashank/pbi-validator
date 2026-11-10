@@ -50,14 +50,17 @@ export function extractVisualsInPage({ sel, maxVisuals, onlyIndex }) {
     const out = [];
     if (!root) return out;
     const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let n;
+    let n, lastParent = null;
     while ((n = w.nextNode()) && out.length < cap) {
       const p = n.parentElement;
       if (!p || SKIP.has(p.tagName.toUpperCase()) || p.closest('title,style,script,defs')) continue;
       const t = norm(n.nodeValue);
       if (!t || !isVisible(p)) continue;
       if (/^(scroll (up|down|left|right)|more options|focus mode|filters on visual)$/i.test(t)) continue; // UI chrome, not data
-      if (out[out.length - 1] !== t) out.push(t);
+      // The same text twice in one element is one value split into text nodes;
+      // in different elements it is two values (two labels that both read "5").
+      if (out[out.length - 1] !== t || p !== lastParent) out.push(t);
+      lastParent = p;
     }
     return out;
   };
@@ -88,10 +91,12 @@ export function extractVisualsInPage({ sel, maxVisuals, onlyIndex }) {
 
     const lines = textLines(content || vc);
     // Grids (table / matrix) – capture as rows of cells.
-    let grid = null;
+    let grid = null, gridCapped = false;
     const gridEl = (content || vc).querySelector('[role="grid"], [role="treegrid"], table');
     if (gridEl) {
-      const rows = [...gridEl.querySelectorAll('[role="row"], tr')].slice(0, 1000);
+      const allRows = gridEl.querySelectorAll('[role="row"], tr');
+      gridCapped = allRows.length > 1000;
+      const rows = [...allRows].slice(0, 1000);
       grid = rows.map((row) => [...row.querySelectorAll('[role="gridcell"], [role="columnheader"], [role="rowheader"], td, th')].map((c) => norm(c.textContent)))
         .filter((cells) => cells.some(Boolean));
     }
@@ -102,7 +107,11 @@ export function extractVisualsInPage({ sel, maxVisuals, onlyIndex }) {
       checked: e.getAttribute('aria-checked') === 'true' || e.getAttribute('aria-selected') === 'true',
     }));
     const hasDropdown = !!vc.querySelector(sel.slicerDropdown);
-    const hasRange = !!vc.querySelector(sel.slicerRangeInputs);
+    const rangeInputs = [...vc.querySelectorAll(sel.slicerRangeInputs)];
+    const hasRange = rangeInputs.length > 0;
+    // Power BI names each visual; the same ID is in the data requests it sends.
+    const idEl = vc.querySelector('[id^="visualsEnterHint-"], [id^="visualsLabel-"]');
+    const visualId = idEl ? idEl.id.replace(/^visuals(EnterHint|Label)-/, '') : null;
     const expanders = vc.querySelectorAll(sel.matrixExpander).length;
     const fullText = norm((vc.innerText || '').slice(0, 4000));
     const errorMatch = fullText.match(errRe);
@@ -112,6 +121,7 @@ export function extractVisualsInPage({ sel, maxVisuals, onlyIndex }) {
     rects.push(r);
     visuals.push({
       domIndex,
+      visualId,
       type,
       roleDesc,
       title,
@@ -120,8 +130,10 @@ export function extractVisualsInPage({ sel, maxVisuals, onlyIndex }) {
       pageBox: { x: r.x, y: r.y, w: r.width, h: r.height },
       lines: lines.slice(0, 2000),
       grid,
+      // More on the page than was read: the comparison of this visual's text is partial.
+      capped: lines.length >= 2000 || gridCapped || pointEls.length > 2000,
       points,
-      slicer: (slicerItems.length || hasDropdown || hasRange) ? { items: slicerItems, hasDropdown, hasRange } : null,
+      slicer: (slicerItems.length || hasDropdown || hasRange) ? { items: slicerItems, hasDropdown, hasRange, range: rangeInputs.map((i) => norm(i.value)) } : null,
       expanders,
       actionable: actionRe.test(ariaLabel) || actionRe.test(groupTitleAttr),
       error: errorMatch ? errorMatch[0] : null,
@@ -306,4 +318,28 @@ export function canvasBoxInPage({ sel }) {
   if (!rects.length) return null;
   const x1 = Math.min(...rects.map((r) => r.x)), y1 = Math.min(...rects.map((r) => r.y));
   return { x: x1, y: y1, w: Math.max(...rects.map((r) => r.right)) - x1, h: Math.max(...rects.map((r) => r.bottom)) - y1 };
+}
+
+/**
+ * How far the report page extends beyond what the window shows (pages set to
+ * "fit to width" or "actual size" scroll). Returns { extraW, extraH } in px.
+ */
+export function canvasOverflowInPage({ sel }) {
+  const list = (s) => (Array.isArray(s) ? s : [s]);
+  let el = null;
+  for (const s of list(sel.canvas)) {
+    const c = document.querySelector(s);
+    if (c && c.getBoundingClientRect().width > 2) { el = c; break; }
+  }
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  let extraW = Math.max(0, r.right - window.innerWidth), extraH = Math.max(0, r.bottom - window.innerHeight);
+  // The page area itself, or a container just around it, scrolls.
+  let node = el;
+  for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+    const cs = getComputedStyle(node);
+    if (/auto|scroll/.test(cs.overflowY)) extraH = Math.max(extraH, node.scrollHeight - node.clientHeight);
+    if (/auto|scroll/.test(cs.overflowX)) extraW = Math.max(extraW, node.scrollWidth - node.clientWidth);
+  }
+  return { extraW: Math.ceil(extraW), extraH: Math.ceil(extraH) };
 }
