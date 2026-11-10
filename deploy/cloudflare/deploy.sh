@@ -102,6 +102,11 @@ fi
 [ -n "$SEED_ONLY" ] && { ok "Done (data only). The app picks it up on its next start."; exit 0; }
 
 # ------------------------------------------------------------------- deploy
+say "Building the web app files (served from Cloudflare's edge)"
+[ -d "$ROOT/node_modules/preact" ] && [ -d "$ROOT/node_modules/htm" ] || (cd "$ROOT" && npm ci --omit=dev --no-audit --no-fund --silent)
+(cd "$ROOT" && npm run --silent build:static)
+ok "Static files built in deploy/cloudflare/.static"
+
 say "Building and deploying (the first build takes several minutes)"
 args=(deploy)
 [ -s "$SECRETS" ] && args+=(--secrets-file "$SECRETS")
@@ -116,7 +121,8 @@ ok "Deployed to $URL"
 # ------------------------------------------------------------------- wake up
 say "Starting the app (first start downloads the image to Cloudflare; can take a few minutes)"
 for i in $(seq 1 60); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/health" || true)"
+  # /api/health deliberately does not wake a sleeping app; this endpoint does (503 "waking" until it is up).
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/auth/config" || true)"
   [ "$code" = 200 ] && break
   sleep 10
 done

@@ -13,14 +13,17 @@ ENV NODE_ENV=production \
     DATA_DIR=/data \
     HEADLESS=true
 
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npx playwright install chromium
-COPY src ./src
-COPY public ./public
-COPY deploy/cloudflare/start.sh /usr/local/bin/pbi-start
-
-RUN chmod 755 /usr/local/bin/pbi-start && mkdir -p /data && chown -R pwuser:pwuser /data /app
+# /app and /data belong to the unprivileged user from the start, so nothing needs a
+# recursive chown (which would copy node_modules into a second image layer).
+RUN mkdir -p /app /data && chown pwuser:pwuser /app /data
 USER pwuser
+WORKDIR /app
+COPY --chown=pwuser:pwuser package.json package-lock.json ./
+# The base image ships Chromium for this Playwright version, so the install is
+# normally a quick check; it only downloads if the versions ever drift apart.
+RUN npm ci --omit=dev --no-audit --no-fund && npx playwright install chromium
+COPY --chown=pwuser:pwuser src ./src
+COPY --chown=pwuser:pwuser public ./public
+COPY --chmod=755 deploy/cloudflare/start.sh /usr/local/bin/pbi-start
 EXPOSE 4400
 CMD ["/usr/local/bin/pbi-start"]

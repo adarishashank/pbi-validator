@@ -4,3 +4,4 @@ node_modules/
 .r2-credentials
 .api-token
 .cf-api-token
+.static/

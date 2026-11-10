@@ -9,7 +9,8 @@
     "cli": "node --disable-warning=ExperimentalWarning src/cli.js",
     "login": "node --disable-warning=ExperimentalWarning src/cli.js login",
     "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 test/*.test.js",
-    "install:browsers": "playwright install chromium"
+    "install:browsers": "playwright install chromium",
+    "build:static": "node scripts/build-static.mjs"
   },
   "author": "",
   "license": "UNLICENSED",

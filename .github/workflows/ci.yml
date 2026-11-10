@@ -1,8 +1,20 @@
 name: CI
+# Documentation-only changes run neither the tests nor the deploy (the deploy
+# workflow starts from a finished CI run).
 on:
   push:
     branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**', 'deploy/oracle/**']
   pull_request:
+    paths-ignore: ['**/*.md', 'docs/**', 'deploy/oracle/**']
+
+# A newer push to the same pull request replaces the older run. Runs on main are
+# never cancelled: the deploy workflow starts from a finished CI run, and a
+# cancelled one would skip the deploy of that commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,5 +26,20 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
+      - name: Cache the Chromium download
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      # Browser cached: only the operating-system libraries are installed.
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
       - run: npm test

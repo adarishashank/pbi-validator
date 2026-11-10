@@ -69,12 +69,19 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: deploy/cloudflare/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            deploy/cloudflare/package-lock.json
 
-      - name: Install Wrangler
+      - name: Install dependencies
         if: steps.check.outputs.ready == 'true'
-        working-directory: deploy/cloudflare
-        run: npm ci --no-audit --no-fund
+        run: |
+          npm ci --omit=dev --no-audit --no-fund            # preact/htm for the static site
+          (cd deploy/cloudflare && npm ci --no-audit --no-fund)   # Wrangler
+
+      - name: Build the static site
+        if: steps.check.outputs.ready == 'true'
+        run: npm run build:static
 
       - name: Make sure the R2 bucket exists
         if: steps.check.outputs.ready == 'true'
@@ -110,13 +117,17 @@ jobs:
           URL: ${{ steps.deploy.outputs.url }}
         run: |
           # The first start after a deploy pulls the image and restores data from R2.
+          # /api/health does not wake a sleeping app; this public endpoint does
+          # (503 "waking up" until the app answers).
           for i in $(seq 1 40); do
-            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/health" || true)"
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/auth/config" || true)"
             echo "attempt $i: HTTP $code"
             [ "$code" = 200 ] && break
             sleep 15
           done
           [ "$code" = 200 ] || { echo "::error::$URL did not become healthy"; exit 1; }
           curl -fsS "$URL/api/auth/config"; echo
+          curl -fsS "$URL/api/health"; echo
+          [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/")" = 200 ] || { echo "::error::Static site is not served"; exit 1; }
           [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/runs")" = 401 ] || { echo "::error::API is not protected"; exit 1; }
           echo "### Deployed: $URL" >> "$GITHUB_STEP_SUMMARY"

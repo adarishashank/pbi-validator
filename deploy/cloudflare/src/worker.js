@@ -4,7 +4,7 @@
  * single Cloudflare Container running the app (Node + headless Chromium).
  *
  * The container's disk is fresh on every start, so the container restores its
- * data from R2 when it boots and saves it back every minute and on shutdown
+ * data from R2 when it boots and saves it back every SYNC_INTERVAL_SECONDS and on shutdown
  * (see start.sh). It sleeps after SLEEP_AFTER of inactivity, but never while a
  * validation run is in progress.
  */
@@ -42,18 +42,40 @@ export class PbiApp extends Container {
   }
 
   async ensureStarted() {
-    await this.startAndWaitForPorts({ ports: APP_PORT, cancellationOptions: { portReadyTimeoutMS: STARTUP_TIMEOUT_MS } });
+    // One start at a time: waking clients retry every few seconds.
+    this.starting ??= this.startAndWaitForPorts({ ports: APP_PORT, cancellationOptions: { portReadyTimeoutMS: STARTUP_TIMEOUT_MS } })
+      .finally(() => { this.starting = null; });
+    await this.starting;
   }
 
   async fetch(request) {
+    const url = new URL(request.url);
     const state = await this.getState();
-    if (state.status !== 'healthy') {
-      const wantsPage = request.method === 'GET' && (request.headers.get('accept') || '').includes('text/html');
-      if (wantsPage) {
-        // Browsers get a friendly page while the app wakes up (restoring data can take a little while).
-        this.ctx.waitUntil(this.ensureStarted().catch((e) => console.error('start failed', e)));
-        return wakingPage();
+    const healthy = state.status === 'healthy';
+
+    // Health polling must neither wake the app nor keep it awake.
+    if (request.method === 'GET' && url.pathname === '/api/health') {
+      if (!healthy) return json({ ok: true, asleep: true, busy: false }, 200);
+      try {
+        // Talk to the container's port directly: containerFetch() (and fetch(),
+        // which calls it) renews the sleep timer, the raw port fetch does not.
+        return await this.container.getTcpPort(APP_PORT).fetch(request.url.replace('https:', 'http:'), request);
+      } catch (e) {
+        // Fall through to the normal path below (it renews the sleep timer, but always answers).
+        console.warn(`direct health check failed: ${e.message}`);
       }
+    }
+
+    if (!healthy) {
+      const wantsPage = request.method === 'GET' && (request.headers.get('accept') || '').includes('text/html');
+      const isApi = url.pathname.startsWith('/api/');
+      const hasBearer = /^Bearer\s/i.test(request.headers.get('authorization') || '');
+      if (wantsPage || (isApi && !hasBearer)) {
+        // Start in the background and answer at once; clients retry (the page refreshes itself).
+        this.ctx.waitUntil(this.ensureStarted().catch((e) => console.error('start failed', e)));
+        return wantsPage ? wakingPage() : wakingJson();
+      }
+      // API/CI clients (Bearer) and other requests wait for the container.
       await this.ensureStarted();
     }
     const res = await super.fetch(request);
@@ -137,6 +159,13 @@ export default {
     ctx.waitUntil(env.APP.getByName('main').checkSchedule().then((r) => console.log(`schedule check: ${r}`)));
   },
 };
+
+function json(body, status, extra = {}) {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra } });
+}
+function wakingJson() {
+  return json({ error: 'The app is waking up', waking: true }, 503, { 'Retry-After': '4' });
+}
 
 function wakingPage() {
   return new Response(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">

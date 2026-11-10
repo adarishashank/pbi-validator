@@ -10,6 +10,16 @@
   // Every minute: wake the app only when a scheduled suite is due (see checkSchedule).
   "triggers": { "crons": ["* * * * *"] },
 
+  // Static files (the web app) are served from Cloudflare's edge, so loading the
+  // page never wakes the container. Only /api/* and /artifacts/* reach the Worker.
+  // The directory is built by `npm run build:static` (deploy.sh and CI do it first).
+  "assets": {
+    "directory": "./.static",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/artifacts/*"]
+  },
+
   "containers": [
     {
       "class_name": "PbiApp",

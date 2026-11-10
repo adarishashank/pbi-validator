@@ -9,14 +9,15 @@ ENV NODE_ENV=production \
     DATA_DIR=/data \
     HEADLESS=true
 
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npx playwright install chromium
-COPY src ./src
-COPY public ./public
-
-RUN mkdir -p /data && chown -R pwuser:pwuser /data /app
+RUN mkdir -p /app /data && chown pwuser:pwuser /app /data
 USER pwuser
+WORKDIR /app
+COPY --chown=pwuser:pwuser package.json package-lock.json ./
+# The base image ships Chromium for this Playwright version, so the install is
+# normally a quick check; it only downloads if the versions ever drift apart.
+RUN npm ci --omit=dev --no-audit --no-fund && npx playwright install chromium
+COPY --chown=pwuser:pwuser src ./src
+COPY --chown=pwuser:pwuser public ./public
 VOLUME ["/data"]
 EXPOSE 4400
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://127.0.0.1:4400/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
