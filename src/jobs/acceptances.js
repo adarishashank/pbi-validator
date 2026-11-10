@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { q, insert, update, nowIso } from '../db.js';
+import { q, insert, update, nowIso, transaction } from '../db.js';
 
 // "Accept as expected": an editor marks a difference as intended. Later runs
 // of the same suite that produce the same check with the same difference get
@@ -25,6 +25,7 @@ export function fingerprint(r) {
   const d = r.details || {};
   const parts = { status: r.status };
   if (d.data && !d.data.equal) parts.data = ops(d.data.ops);
+  if (d.query && !d.query.equal) parts.query = ops(d.query.ops);
   if (d.dataDiffs?.length) parts.dataDiffs = d.dataDiffs.map((x) => [x.visual, x.only || null, ops(x.ops)]);
   if (d.issues?.length) parts.issues = d.issues.map((i) => `${i.kind}:${i.visual}`).sort();
   if (d.missingIn) parts.missingIn = d.missingIn;
@@ -33,7 +34,7 @@ export function fingerprint(r) {
   }
   if (d.onlyInA || d.onlyInB || d.renamed) parts.pages = { a: d.onlyInA || [], b: d.onlyInB || [], renamed: d.renamed || [], order: !!d.orderChanged };
   if (d.errors) parts.errors = Object.entries(d.errors).map(([side, list]) => [side, (list || []).map((e) => `${e.visual}:${e.error}`).sort()]);
-  if (d.note && !parts.data && !parts.outcome && !parts.dataDiffs) parts.note = stableNote(d.note);
+  if (d.note && !parts.data && !parts.query && !parts.outcome && !parts.dataDiffs) parts.note = stableNote(d.note);
   return crypto.createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 24);
 }
 
@@ -97,6 +98,7 @@ export function acceptResult(resultId, { scope = 'exact', note = '', user = null
   if (!ACCEPTABLE.has(r.status)) throw Object.assign(new Error(r.status === 'accepted' ? 'Already accepted' : `A "${r.status}" result can't be accepted`), { status: 400 });
   const key = matchKey(r), fp = scope === 'exact' ? fingerprint(r) : '';
   const existing = q.get('SELECT * FROM acceptances WHERE suite_id = ? AND match_key = ? AND scope = ? AND fingerprint = ?', run.suite_id, key, scope, fp);
+  return transaction(() => {
   const id = existing?.id ?? insert('acceptances', {
     suite_id: run.suite_id, match_key: key, scope, fingerprint: fp, original_status: r.status,
     title: r.title, page: r.page, scenario: r.scenario, note: String(note || '').slice(0, 500),
@@ -113,12 +115,14 @@ export function acceptResult(resultId, { scope = 'exact', note = '', user = null
   }
   q.run('UPDATE acceptances SET last_matched_at = ?, match_count = match_count + ? WHERE id = ?', nowIso(), changed, id);
   return { acceptance: q.get('SELECT * FROM acceptances WHERE id = ?', id), run: recomputeRun(run.id), changed };
+  });
 }
 
 /** Removes an acceptance; results it accepted (in any run) are flagged again. */
 export function revokeAcceptance(acceptanceId) {
   const rule = q.get('SELECT * FROM acceptances WHERE id = ?', acceptanceId);
   if (!rule) throw Object.assign(new Error('Acceptance not found'), { status: 404 });
+  return transaction(() => {
   const runs = new Set();
   for (const r of q.all("SELECT r.* FROM results r JOIN runs u ON u.id = r.run_id WHERE u.suite_id = ? AND r.status = 'accepted'", rule.suite_id)) {
     if (r.details?.accepted?.id !== rule.id) continue;
@@ -129,4 +133,5 @@ export function revokeAcceptance(acceptanceId) {
   q.run('DELETE FROM acceptances WHERE id = ?', rule.id);
   for (const runId of runs) recomputeRun(runId);
   return { rule, runsUpdated: runs.size };
+  });
 }

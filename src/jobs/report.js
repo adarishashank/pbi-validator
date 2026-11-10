@@ -476,14 +476,23 @@ const serial = (fn) => {
   return p;
 };
 
-/** Renders the run report to a PDF Buffer with headless Chromium. */
+/**
+ * Renders the run report to a PDF Buffer with headless Chromium. The PDF is cached in the run's
+ * folder, keyed by the run's finished_at plus a hash of the report HTML (which already reflects
+ * acceptances, AI results and Q&A), so an unchanged run is never re-rendered.
+ */
 export function renderRunPdf(bundle) {
   return serial(async () => {
     const { run } = bundle;
     const dir = runDir(run.id);
     fs.mkdirSync(dir, { recursive: true });
+    const html = reportHtml(bundle);
+    // The "Generated" stamp changes every minute; it must not defeat the cache.
+    const key = crypto.createHash('sha1').update(String(run.finished_at)).update(html.replace(/<b>Generated<\/b><span>[^<]*<\/span>/, '')).digest('hex').slice(0, 20);
+    const cached = path.join(dir, `.report-${key}.pdf`);
+    try { return await fs.promises.readFile(cached); } catch { /* not cached yet */ }
     const file = path.join(dir, `.print-${crypto.randomBytes(6).toString('hex')}.html`);
-    fs.writeFileSync(file, reportHtml(bundle));
+    fs.writeFileSync(file, html);
     const started = Date.now();
     const browser = await launchBrowser({ headless: true });
     try {
@@ -496,6 +505,10 @@ export function renderRunPdf(bundle) {
         margin: { top: '14mm', bottom: '16mm', left: '12mm', right: '12mm' },
       });
       logger.info(`PDF for run #${run.id}: ${(pdf.length / 1024).toFixed(0)} KB in ${Date.now() - started} ms`);
+      try {
+        for (const f of fs.readdirSync(dir)) if (/^\.report-.*\.pdf$/.test(f)) fs.rmSync(path.join(dir, f), { force: true }); // stale keys
+        fs.writeFileSync(cached, pdf);
+      } catch { /* caching is best effort */ }
       return pdf;
     } finally {
       await browser.close().catch(() => {});

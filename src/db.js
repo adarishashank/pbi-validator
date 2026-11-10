@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { config } from './config.js';
 
 const db = new DatabaseSync(config.dbPath);
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;\n  PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -16000;');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS auth_profiles (
@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS ai_analyses (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ai_run ON ai_analyses(run_id, kind, id);
+CREATE INDEX IF NOT EXISTS idx_ai_result ON ai_analyses(result_id);
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -145,6 +146,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   detail TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(ts);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -154,6 +156,9 @@ CREATE TABLE IF NOT EXISTS settings (
 // Additive migrations for databases created by earlier versions.
 const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
 if (!hasColumn('runs', 'triggered_by')) db.exec('ALTER TABLE runs ADD COLUMN triggered_by TEXT');
+db.exec(`CREATE INDEX IF NOT EXISTS idx_runs_queued ON runs(queued_at);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_triggered_by ON runs(triggered_by);`);
 // When a one-time (temporary) password stops working; NULL once the user has chosen their own.
 // When each scheduled suite is next due (persisted so a sleeping/restarted app can catch up).
 if (!hasColumn('suites', 'next_scheduled_at')) db.exec('ALTER TABLE suites ADD COLUMN next_scheduled_at TEXT');
@@ -204,11 +209,30 @@ function hydrate(row) {
 
 const enc = (v) => (v !== null && typeof v === 'object' ? JSON.stringify(v) : v);
 
+// Prepared statements are cached by SQL text (bounded: dynamic SQL could otherwise grow it forever).
+const stmts = new Map();
+function prep(sql) {
+  let st = stmts.get(sql);
+  if (!st) {
+    if (stmts.size >= 500) stmts.clear();
+    st = db.prepare(sql);
+    stmts.set(sql, st);
+  }
+  return st;
+}
+
 export const q = {
-  all: (sql, ...p) => db.prepare(sql).all(...p.map(enc)).map(hydrate),
-  get: (sql, ...p) => hydrate(db.prepare(sql).get(...p.map(enc))),
-  run: (sql, ...p) => db.prepare(sql).run(...p.map(enc)),
+  all: (sql, ...p) => prep(sql).all(...p.map(enc)).map(hydrate),
+  get: (sql, ...p) => hydrate(prep(sql).get(...p.map(enc))),
+  run: (sql, ...p) => prep(sql).run(...p.map(enc)),
 };
+
+/** Runs fn inside one transaction (nested calls just join the outer one). Rolls back if fn throws. */
+export function transaction(fn) {
+  if (db.isTransaction) return fn();
+  db.exec('BEGIN');
+  try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { try { db.exec('ROLLBACK'); } catch { /* already rolled back */ } throw e; }
+}
 
 /** Generic insert/update helpers driven by a whitelist of columns. */
 export function insert(table, data) {
@@ -233,6 +257,8 @@ export function recoverInterruptedRuns() {
     `UPDATE runs SET status='error', error='Interrupted: server restarted while run was active', finished_at=? WHERE status IN ('running','queued')`,
     nowIso(),
   );
+  // AI jobs die with the process too: stop the UI polling rows that will never finish.
+  q.run(`UPDATE ai_analyses SET status='error', error='Interrupted by a restart' WHERE status='running'`);
   return Number(r.changes);
 }
 

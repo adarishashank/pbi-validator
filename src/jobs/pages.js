@@ -35,7 +35,11 @@ const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString('en-GB', { dateStyl
 const DEFAULTS = { project: 'pbireporttest', url: '', passwordSet: false, lastDeployAt: null, lastError: null };
 export const pagesSettings = () => ({ ...DEFAULTS, ...(getSetting('pages', {}) || {}) });
 const savePages = (patch) => { const next = { ...pagesSettings(), ...patch }; setSetting('pages', next); return next; };
-const job = { running: false, step: '', startedAt: null };
+const job = { running: false, step: '', startedAt: null, depth: 0 };
+// job.running stays true from the first publish step until the last deploy has finished
+// (nested/queued phases hold it via a depth counter), so a second publish can't slip into the gap.
+const jobStart = (step) => { job.depth++; job.running = true; job.step = step; job.startedAt ??= nowIso(); };
+const jobEnd = () => { if (--job.depth <= 0) { job.depth = 0; job.running = false; job.step = ''; job.startedAt = null; } };
 
 export function pagesStatus() {
   const s = pagesSettings();
@@ -98,8 +102,9 @@ export async function buildPublishedRun(runId) {
   if (!bundle) throw Object.assign(new Error('Run not found'), { status: 404 });
   const { run } = bundle;
   const out = path.join(PUBLISHED_DIR(), String(run.id));
-  fs.rmSync(out, { recursive: true, force: true });
-  fs.mkdirSync(path.join(out, 'images'), { recursive: true });
+  const fsp = fs.promises;
+  await fsp.rm(out, { recursive: true, force: true });
+  await fsp.mkdir(path.join(out, 'images'), { recursive: true });
   const src = runDir(run.id);
   const used = new Set();
   const results = bundle.results.map((r) => ({
@@ -107,15 +112,18 @@ export async function buildPublishedRun(runId) {
     images: Object.fromEntries(Object.entries(r.images || {}).filter(([, f]) => f && fs.existsSync(path.join(src, path.basename(f))))
       .map(([k, f]) => { used.add(path.basename(f)); return [k, `images/${path.basename(f)}`]; })),
   }));
-  for (const f of used) fs.copyFileSync(path.join(src, f), path.join(out, 'images', f));
-  fs.writeFileSync(path.join(out, 'index.html'), renderHtml({ ...bundle, results }, { topBar: linkBar(run) }));
-  fs.writeFileSync(path.join(out, 'report.pdf'), await renderRunPdf(bundle));
-  fs.writeFileSync(path.join(out, 'report.xlsx'), await xlsxBuffer(runSheets(bundle)));
+  const files = [...used];
+  for (let i = 0; i < files.length; i += 16) { // bounded parallelism
+    await Promise.all(files.slice(i, i + 16).map((f) => fsp.copyFile(path.join(src, f), path.join(out, 'images', f))));
+  }
+  await fsp.writeFile(path.join(out, 'index.html'), renderHtml({ ...bundle, results }, { topBar: linkBar(run) }));
+  await fsp.writeFile(path.join(out, 'report.pdf'), await renderRunPdf(bundle));
+  await fsp.writeFile(path.join(out, 'report.xlsx'), await xlsxBuffer(runSheets(bundle)));
   const by = {};
   for (const r of bundle.results) by[r.status] = (by[r.status] || 0) + 1;
   const S = bundle.ai?.summary?.status === 'done' ? bundle.ai.summary.content : null;
   const reps = run.snapshot?.reports || {};
-  fs.writeFileSync(path.join(out, 'meta.json'), JSON.stringify({
+  await fsp.writeFile(path.join(out, 'meta.json'), JSON.stringify({
     id: run.id, suite: run.suite_name, status: run.status, startedAt: run.started_at || run.queued_at, finishedAt: run.finished_at,
     by, total: bundle.results.length, risk: S?.risk || null, headline: S?.headline || null,
     a: reps.A ? `${reps.A.name}${reps.A.environment ? ` · ${reps.A.environment}` : ''}` : null,
@@ -202,31 +210,34 @@ input{width:100%;max-width:420px;padding:10px 12px;border:1px solid #cfd5de;bord
 </body></html>`;
 }
 
-const countFiles = (dir) => {
+const countFiles = async (dir) => {
   let n = 0;
-  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) walk(path.join(d, e.name)); else n++; } };
-  if (fs.existsSync(dir)) walk(dir);
+  const walk = async (d) => { for (const e of await fs.promises.readdir(d, { withFileTypes: true })) { if (e.isDirectory()) await walk(path.join(d, e.name)); else n++; } };
+  if (fs.existsSync(dir)) await walk(dir);
   return n;
 };
 
 /** Assembles data/pages-site from every published run. */
-export function buildSite() {
+export async function buildSite() {
+  const fsp = fs.promises;
   const site = SITE_DIR();
-  fs.rmSync(site, { recursive: true, force: true });
-  fs.mkdirSync(path.join(site, 'runs'), { recursive: true });
+  await fsp.rm(site, { recursive: true, force: true });
+  await fsp.mkdir(path.join(site, 'runs'), { recursive: true });
   const rows = q.all('SELECT id FROM runs WHERE published_at IS NOT NULL ORDER BY id DESC');
   const metas = [];
   for (const { id } of rows) {
     const from = path.join(PUBLISHED_DIR(), String(id));
     if (!fs.existsSync(path.join(from, 'meta.json'))) continue;
-    fs.cpSync(from, path.join(site, 'runs', String(id)), { recursive: true });
-    metas.push(JSON.parse(fs.readFileSync(path.join(from, 'meta.json'), 'utf8')));
+    await fsp.cp(from, path.join(site, 'runs', String(id)), { recursive: true });
+    metas.push(JSON.parse(await fsp.readFile(path.join(from, 'meta.json'), 'utf8')));
   }
-  fs.writeFileSync(path.join(site, 'index.html'), indexHtml(metas));
-  fs.writeFileSync(path.join(site, '_worker.js'), WORKER);
-  fs.writeFileSync(path.join(site, '_headers'), HEADERS);
-  fs.writeFileSync(path.join(site, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
-  const files = countFiles(site);
+  await Promise.all([
+    fsp.writeFile(path.join(site, 'index.html'), indexHtml(metas)),
+    fsp.writeFile(path.join(site, '_worker.js'), WORKER),
+    fsp.writeFile(path.join(site, '_headers'), HEADERS),
+    fsp.writeFile(path.join(site, 'robots.txt'), 'User-agent: *\nDisallow: /\n'),
+  ]);
+  const files = await countFiles(site);
   if (files > MAX_FILES) throw Object.assign(new Error(`The results site would have ${files} files; Cloudflare Pages allows 20,000. Unpublish some runs first.`), { status: 413 });
   return { site, runs: metas.length, files };
 }
@@ -237,12 +248,12 @@ const serial = (fn) => { const p = serialChain.p.then(fn, fn); serialChain.p = p
 
 /** Rebuilds and deploys the whole site (Pages deployments replace the site). */
 export function deploySite(reason = 'update') {
+  jobStart(job.step || 'Waiting to deploy');
   return serial(async () => {
-    job.running = true; job.startedAt = nowIso();
     try {
       const s = pagesSettings();
       job.step = 'Building the site';
-      const built = buildSite();
+      const built = await buildSite();
       job.step = 'Connecting to Cloudflare';
       await ensureProject(s.project);
       job.step = `Uploading ${built.runs} run(s) to Cloudflare Pages`;
@@ -256,7 +267,7 @@ export function deploySite(reason = 'update') {
       savePages({ lastError: e.message });
       throw e;
     } finally {
-      job.running = false; job.step = '';
+      jobEnd();
     }
   });
 }
@@ -265,22 +276,32 @@ export async function publishRun(runId) {
   const run = q.get('SELECT id, status FROM runs WHERE id = ?', runId);
   if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
   if (['queued', 'running'].includes(run.status)) throw Object.assign(new Error('Wait for the run to finish before publishing it'), { status: 409 });
-  job.running = true; job.step = `Preparing run #${runId} (PDF, Excel, screenshots)`;
-  try { await buildPublishedRun(runId); } finally { job.running = false; }
-  q.run('UPDATE runs SET published_at = ? WHERE id = ?', nowIso(), runId);
-  return deploySite(`publish run #${runId}`);
+  jobStart(`Preparing run #${runId} (PDF, Excel, screenshots)`);
+  let deploy;
+  try {
+    await buildPublishedRun(runId);
+    q.run('UPDATE runs SET published_at = ? WHERE id = ?', nowIso(), runId);
+    deploy = deploySite(`publish run #${runId}`); // takes its own hold on job.running before ours is released
+  } finally { jobEnd(); }
+  return deploy;
 }
 
 export async function unpublishRun(runId) {
-  q.run('UPDATE runs SET published_at = NULL WHERE id = ?', runId);
-  fs.rmSync(path.join(PUBLISHED_DIR(), String(runId)), { recursive: true, force: true });
-  return deploySite(`unpublish run #${runId}`);
+  jobStart(`Removing run #${runId}`);
+  let deploy;
+  try {
+    q.run('UPDATE runs SET published_at = NULL WHERE id = ?', runId);
+    await fs.promises.rm(path.join(PUBLISHED_DIR(), String(runId)), { recursive: true, force: true });
+    deploy = deploySite(`unpublish run #${runId}`);
+  } finally { jobEnd(); }
+  return deploy;
 }
 
 /** Sets (or removes, with an empty value) the site password, then redeploys so it applies. */
 export async function setSitePassword(password) {
   const s = pagesSettings();
-  job.running = true; job.step = password ? 'Saving the site password' : 'Removing the site password';
+  jobStart(password ? 'Saving the site password' : 'Removing the site password');
+  let deploy;
   try {
     await ensureProject(s.project);
     if (password) await wrangler(['pages', 'secret', 'put', 'SITE_PASSWORD', '--project-name', s.project], { input: password });
@@ -289,13 +310,13 @@ export async function setSitePassword(password) {
         if (!/not found|does not exist/i.test(e.output || e.message)) throw e;
       }
     }
+    savePages({ passwordSet: Boolean(password) });
+    deploy = deploySite(password ? 'password set' : 'password removed');
   } catch (e) {
-    job.running = false; job.step = '';
     savePages({ lastError: e.message });
     throw e;
-  }
-  savePages({ passwordSet: Boolean(password) });
-  return deploySite(password ? 'password set' : 'password removed');
+  } finally { jobEnd(); }
+  return deploy;
 }
 
 export const setPagesProject = (project) => savePages({ project, url: '' });

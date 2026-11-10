@@ -78,7 +78,7 @@ export async function chat({ model, messages, maxTokens = 2048, temperature = 0.
         const hint = res.status === 401 || res.status === 403 ? ' — check NVIDIA_API_KEY' : res.status === 404 ? ` — model "${model}" not available on this endpoint (set AI_TEXT_MODEL / AI_VISION_MODEL)` : '';
         const retryable = res.status === 429 || res.status >= 500;
         const err = new AiError(`AI endpoint ${res.status}${hint}: ${text.slice(0, 300)}`, retryable ? 503 : 502, retryable);
-        if (retryable) { lastErr = err; await sleep(1500 * 2 ** attempt); continue; }
+        if (retryable) { lastErr = err; if (attempt < 3) await sleep(1500 * 2 ** attempt); continue; }
         throw err;
       }
       const data = JSON.parse(text);
@@ -90,7 +90,7 @@ export async function chat({ model, messages, maxTokens = 2048, temperature = 0.
     } catch (e) {
       if (e instanceof AiError && !e.retryable) throw e;
       lastErr = e.name === 'AbortError' ? new AiError(`AI request timed out after ${Math.round(timeoutMs / 1000)}s`, 504) : e;
-      await sleep(1500 * 2 ** attempt);
+      if (attempt < 3) await sleep(1500 * 2 ** attempt); // no point sleeping after the last attempt
     } finally {
       clearTimeout(timer);
     }

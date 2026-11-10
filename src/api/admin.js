@@ -168,28 +168,39 @@ router.get('/admin/audit', (req, res) => {
   if (req.query.user) { where.push('user_email LIKE ?'); params.push(`%${String(req.query.user)}%`); }
   if (req.query.action) { where.push('action LIKE ?'); params.push(`${String(req.query.action)}%`); }
   if (req.query.failed === '1') { where.push('(status >= 400 OR action LIKE \'%failed%\' OR action LIKE \'%blocked%\')'); }
-  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 100, 500)); // a negative LIMIT would mean "no limit" in SQLite
   const rows = q.all(`SELECT * FROM audit_log ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ${limit}`, ...params);
   res.json({ rows, next: rows.length === limit ? rows[rows.length - 1].id : null });
 });
 
 // ----------------------------------------------------------------- system
-function dirSize(dir) {
+async function dirSize(dir) {
   let total = 0, files = 0;
-  const walk = (d) => {
+  const walk = async (d) => {
     let entries = [];
-    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
+    try { entries = await fs.promises.readdir(d, { withFileTypes: true }); } catch { return; }
+    await Promise.all(entries.map(async (e) => {
       const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else { try { total += fs.statSync(p).size; files += 1; } catch { /* vanished */ } }
-    }
+      if (e.isDirectory()) await walk(p);
+      else { try { total += (await fs.promises.stat(p)).size; files += 1; } catch { /* vanished */ } }
+    }));
   };
-  walk(dir);
+  await walk(dir);
   return { bytes: total, files };
 }
 
-router.get('/admin/system', (req, res) => {
+// Walking the runs folder is slow on big installs: do it asynchronously and at most once a minute.
+let sizesCache = { at: 0, value: null, pending: null };
+function storageSizes() {
+  if (sizesCache.value && Date.now() - sizesCache.at < 60_000) return Promise.resolve(sizesCache.value);
+  sizesCache.pending ??= Promise.all([dirSize(config.runsDir), dirSize(config.discoveryDir)])
+    .then(([screenshots, discovery]) => { sizesCache.value = { screenshots, discovery }; sizesCache.at = Date.now(); return sizesCache.value; })
+    .finally(() => { sizesCache.pending = null; });
+  return sizesCache.pending;
+}
+
+router.get('/admin/system', async (req, res) => {
+  const sizes = await storageSizes();
   const count = (sql, ...p) => q.get(sql, ...p).n;
   const now = nowIso();
   res.json({
@@ -202,8 +213,8 @@ router.get('/admin/system', (req, res) => {
     dataDir: config.dataDir,
     storage: {
       database: (() => { try { return fs.statSync(config.dbPath).size; } catch { return 0; } })(),
-      screenshots: dirSize(config.runsDir),
-      discovery: dirSize(config.discoveryDir),
+      screenshots: sizes.screenshots,
+      discovery: sizes.discovery,
     },
     counts: {
       users: count('SELECT COUNT(*) n FROM users'),

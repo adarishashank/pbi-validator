@@ -90,10 +90,15 @@ export async function checkProfile(profileId) {
     const page = await context.newPage();
     await page.goto(profile.login_url || config.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     let status = 'active';
-    const end = Date.now() + 20000;
+    // Redirects to the login page can come late, so keep watching, but stop early once the page
+    // has fully loaded on a non-login URL and stayed there for 8 seconds (20 s is the upper bound).
+    const t0 = Date.now(), end = t0 + 20000;
+    let loadedAt = 0;
     while (Date.now() < end) {
       if (loginRe.test(page.url())) { status = 'expired'; break; }
-      await new Promise((r) => setTimeout(r, 1000));
+      if (!loadedAt && await page.evaluate(() => document.readyState === 'complete').catch(() => false)) loadedAt = Date.now();
+      if (loadedAt && Date.now() - loadedAt >= 8000) break; // Power BI redirects an expired session only after its app has started
+      await new Promise((r) => setTimeout(r, 500));
     }
     if (status === 'active') await writeStateFile(file, await context.storageState());
     const detail = status === 'active' ? 'Session valid' : 'Session expired – sign in again';

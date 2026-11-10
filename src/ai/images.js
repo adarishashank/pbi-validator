@@ -33,28 +33,57 @@ function crop(png, r) {
   return out;
 }
 
+/** Bounding box of the real-difference pixels (pure red) in a stored diff image, or null. */
+function regionFromDiffFile(diffFile) {
+  const d = PNG.sync.read(fs.readFileSync(diffFile));
+  let x1 = d.width, y1 = d.height, x2 = -1, y2 = -1;
+  for (let y = 0; y < d.height; y++) {
+    for (let x = 0; x < d.width; x++) {
+      const i = (y * d.width + x) * 4;
+      if (d.data[i] === 255 && d.data[i + 1] === 0 && d.data[i + 2] === 0 && d.data[i + 3] === 255) {
+        if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y;
+      }
+    }
+  }
+  return x2 < 0 ? null : { x: x1, y: y1, w: x2 - x1 + 1, h: y2 - y1 + 1 };
+}
+
 /**
  * Builds one image for the vision model: A (left) | B (right), cropped to
  * the area that actually differs so details stay legible after scaling.
+ * `diffFile` (the result's stored diff image) gives the differing area without re-running the
+ * full pixel diff; each side is scaled down before compositing so the big canvas is never built.
  */
-export function buildComparisonImage(fileA, fileB, { maxW = 1600, maxH = 1000, gap = 16 } = {}) {
+export function buildComparisonImage(fileA, fileB, { maxW = 1600, maxH = 1000, gap = 16, diffFile = null } = {}) {
   const bufA = fs.readFileSync(fileA), bufB = fs.readFileSync(fileB);
   let a = PNG.sync.read(bufA), b = PNG.sync.read(bufB);
   const W = Math.min(a.width, b.width), H = Math.min(a.height, b.height);
   let region = null;
   try {
-    const d = diffImages(bufA, bufB);
-    if (d.regions.length) {
-      const x1 = Math.min(...d.regions.map((r) => r.x)), y1 = Math.min(...d.regions.map((r) => r.y));
-      const x2 = Math.max(...d.regions.map((r) => r.x + r.w)), y2 = Math.max(...d.regions.map((r) => r.y + r.h));
+    let box = null;
+    if (diffFile && fs.existsSync(diffFile)) box = regionFromDiffFile(diffFile);
+    else {
+      const d = diffImages(bufA, bufB);
+      if (d.regions.length) {
+        const x1 = Math.min(...d.regions.map((r) => r.x)), y1 = Math.min(...d.regions.map((r) => r.y));
+        box = { x: x1, y: y1, w: Math.max(...d.regions.map((r) => r.x + r.w)) - x1, h: Math.max(...d.regions.map((r) => r.y + r.h)) - y1 };
+      }
+    }
+    if (box) {
       const pad = 60;
-      const r = { x: Math.max(0, x1 - pad), y: Math.max(0, y1 - pad) };
-      r.w = Math.min(W, x2 + pad) - r.x;
-      r.h = Math.min(H, y2 + pad) - r.y;
+      const r = { x: Math.max(0, box.x - pad), y: Math.max(0, box.y - pad) };
+      r.w = Math.min(W, box.x + box.w + pad) - r.x;
+      r.h = Math.min(H, box.y + box.h + pad) - r.y;
       if (r.w * r.h < 0.6 * W * H && r.w > 40 && r.h > 40) region = r;
     }
   } catch { /* fall back to full images */ }
   if (region) { a = crop(a, region); b = crop(b, region); }
+  // Scale each side so the composite fits maxW x maxH, instead of scaling the finished canvas.
+  const s = Math.min(1, maxW / (a.width + gap + b.width), maxH / Math.max(a.height, b.height));
+  if (s < 1) {
+    a = downscale(a, Math.max(1, Math.round(a.width * s)), Math.max(1, Math.round(a.height * s)));
+    b = downscale(b, Math.max(1, Math.round(b.width * s)), Math.max(1, Math.round(b.height * s)));
+  }
   const out = new PNG({ width: a.width + gap + b.width, height: Math.max(a.height, b.height) });
   out.data.fill(255);
   for (let y = 0; y < out.height; y++) {           // separator bar
@@ -62,7 +91,7 @@ export function buildComparisonImage(fileA, fileB, { maxW = 1600, maxH = 1000, g
   }
   PNG.bitblt(a, out, 0, 0, a.width, a.height, 0, 0);
   PNG.bitblt(b, out, 0, 0, b.width, b.height, a.width + gap, 0);
-  return { png: PNG.sync.write(downscale(out, maxW, maxH)), cropped: !!region, region };
+  return { png: PNG.sync.write(out), cropped: !!region, region };
 }
 
 export function singleImage(file, { maxW = 1600, maxH = 1000 } = {}) {

@@ -30,6 +30,7 @@ export function describe(r) {
   if (d.orderChanged) parts.push('page order differs');
   if (d.issues?.length) parts.push(d.issues.slice(0, 5).map((i) => `${i.kind.replace(/_/g, ' ')}: ${i.visual}`).join('; '));
   if (d.data && !d.data.equal) parts.push(`data differs (+${d.data.added}/−${d.data.removed} lines)`);
+  if (d.query && !d.query.equal) parts.push(`data behind the visual differs (+${d.query.added}/−${d.query.removed} rows)`);
   if (d.dataDiffs?.length) parts.push(`${d.dataDiffs.length} visual(s) with different data`);
   if (d.errors) {
     const errs = Object.entries(d.errors).flatMap(([s, list]) => list.map((e) => `${s}: ${e.visual} — ${e.error}`));
@@ -76,7 +77,8 @@ export function streamHtmlZip(bundle, res) {
   zip.append(renderHtml(data), { name: 'index.html' });
   zip.append(JSON.stringify(bundle, null, 2), { name: 'report.json' });
   if (fs.existsSync(dir)) {
-    for (const f of fs.readdirSync(dir)) if (f.endsWith('.png')) zip.file(path.join(dir, f), { name: `images/${f}` });
+    // PNGs are already compressed: store them (no deflate). Thumbnails are UI-only, not part of the export.
+    for (const f of fs.readdirSync(dir)) if (f.endsWith('.png') && !f.endsWith('.thumb.png')) zip.file(path.join(dir, f), { name: `images/${f}`, store: true });
   }
   zip.finalize();
 }
@@ -134,6 +136,7 @@ function card(r){const d=r.details||{};let h='<div class="card"><h3><span class=
 const im=Object.entries(r.images||{});if(im.length)h+='<div class="imgs">'+im.map(([k,f])=>'<figure><figcaption>'+esc(LBL[k]||k)+'</figcaption><img loading="lazy" src="'+f+'"></figure>').join('')+'</div>';
 const v=VIS[r.id];if(v&&v.status==='done')h+='<div class="meta" style="color:#6d28d9;margin-top:8px">🤖 '+esc(v.content.whatChanged)+(v.content.likelyNoise?' (likely rendering noise)':'')+'</div>';
 if(d.data&&!d.data.equal)h+='<details open><summary>Data differences (+'+d.data.added+' / −'+d.data.removed+')</summary>'+ops(d.data)+'</details>';
+if(d.query&&!d.query.equal)h+='<details open><summary>Data behind the visual differs (+'+d.query.added+' / −'+d.query.removed+' rows, unrounded)</summary>'+ops(d.query)+'</details>';
 if(d.dataDiffs&&d.dataDiffs.length)h+='<details><summary>'+d.dataDiffs.length+' visual(s) with different data after the interaction</summary>'+d.dataDiffs.map(x=>'<div><b>'+esc(x.visual)+'</b>'+(x.only?' — only in '+x.only:'')+ops({ops:x.ops||[]})+'</div>').join('')+'</details>';
 if(d.issues&&d.issues.length)h+='<details open><summary>'+d.issues.length+' structural issue(s)</summary><pre>'+esc(d.issues.map(i=>i.kind+': '+i.visual+(i.a!==undefined?'  A='+JSON.stringify(i.a)+'  B='+JSON.stringify(i.b):'')).join('\\n'))+'</pre></details>';
 h+='<details><summary>Raw details</summary><pre>'+esc(JSON.stringify(d,null,2))+'</pre></details></div>';return h;}

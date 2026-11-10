@@ -33,6 +33,11 @@ function resultLine(r) {
       .map((o) => (o.op === 'chg' ? `"${clip(o.a, 80)}" → "${clip(o.b, 80)}"` : o.op === 'add' ? `+ "${clip(o.b, 80)}"` : `- "${clip(o.a, 80)}"`));
     bits.push(`  data A→B: ${chg.join('; ')}${d.data.added + d.data.removed > 16 ? ' …' : ''}`);
   }
+  if (d.query && !d.query.equal) {
+    const chg = d.query.ops.filter((o) => o.op !== 'eq' && o.op !== 'skip').slice(0, 8)
+      .map((o) => (o.op === 'chg' ? `"${clip(o.a, 80)}" → "${clip(o.b, 80)}"` : o.op === 'add' ? `+ "${clip(o.b, 80)}"` : `- "${clip(o.a, 80)}"`));
+    bits.push(`  underlying data (unrounded rows) A→B: ${chg.join('; ')}${d.query.added + d.query.removed > 16 ? ' …' : ''}`);
+  }
   if (d.dataDiffs?.length) bits.push(`  visuals with different data afterwards: ${d.dataDiffs.slice(0, 6).map((x) => `${x.visual}${x.only ? ` (only ${x.only})` : ` (+${x.added}/-${x.removed})`}`).join('; ')}`);
   if (d.issues?.length) bits.push(`  layout: ${d.issues.slice(0, 6).map((i) => `${i.kind} ${i.visual}`).join('; ')}`);
   if (d.onlyInA?.length || d.onlyInB?.length || d.renamed?.length) bits.push(`  pages only in A: ${d.onlyInA?.join(', ') || '-'}; only in B: ${d.onlyInB?.join(', ') || '-'}; renamed: ${(d.renamed || []).map((x) => `${x.a}→${x.b}`).join(', ') || '-'}`);
@@ -177,6 +182,7 @@ async function summarise(runId, digest, values) {
 }
 
 async function anomalies(runId, digest, values) {
+  if (values.startsWith('(no extracted values available)')) return; // nothing to review: don't pay for an empty call
   const id = startRecord(runId, 'anomalies', config.ai.textModel);
   emit(runId, { stage: 'anomalies', status: 'running' });
   try {
@@ -196,15 +202,26 @@ async function anomalies(runId, digest, values) {
   }
 }
 
-/** Vision explanation of one result's screenshots. */
-export async function explainResult(resultId) {
+const visionInFlight = new Map(); // resultId -> promise (two concurrent requests share one paid call)
+
+/** Vision explanation of one result's screenshots. Returns the finished one if it already exists. */
+export function explainResult(resultId) {
+  const done = q.get("SELECT * FROM ai_analyses WHERE result_id = ? AND kind = 'vision' AND status = 'done' ORDER BY id DESC LIMIT 1", resultId);
+  if (done) return Promise.resolve(done);
+  if (visionInFlight.has(resultId)) return visionInFlight.get(resultId);
+  const p = explainResultNow(resultId).finally(() => visionInFlight.delete(resultId));
+  visionInFlight.set(resultId, p);
+  return p;
+}
+
+async function explainResultNow(resultId) {
   const r = q.get('SELECT * FROM results WHERE id = ?', resultId);
   if (!r) throw Object.assign(new Error('Result not found'), { status: 404 });
   if (!config.ai.allowImages) throw Object.assign(new Error('Sending screenshots to the AI is disabled (AI_ALLOW_IMAGES=false)'), { status: 403 });
   const dir = runDirOf(r.run_id);
   const im = r.images || {};
   let img, layout;
-  if (im.a && im.b) { img = buildComparisonImage(path.join(dir, im.a), path.join(dir, im.b)).png; layout = 'LEFT half = report A (baseline), RIGHT half = report B (candidate), separated by a red vertical bar.'; }
+  if (im.a && im.b) { img = buildComparisonImage(path.join(dir, im.a), path.join(dir, im.b), { diffFile: im.diff ? path.join(dir, im.diff) : null }).png; layout = 'LEFT half = report A (baseline), RIGHT half = report B (candidate), separated by a red vertical bar.'; }
   else if (im.a || im.b) { img = singleImage(path.join(dir, im.a || im.b)); layout = `Single screenshot from report ${im.a ? 'A' : 'B'}.`; }
   else throw Object.assign(new Error('This result has no screenshots'), { status: 400 });
 
@@ -233,9 +250,25 @@ export async function explainResult(resultId) {
 }
 
 /** Free-form Q&A grounded in the run's results and extracted values. */
-export async function askRun(runId, question, history = []) {
+const askDigests = new Map(); // runId -> { key, digest, values }
+function askDigest(runId) {
+  const run = q.get('SELECT status, finished_at, summary FROM runs WHERE id = ?', runId);
+  const agg = q.get("SELECT COUNT(*) AS n, MAX(id) AS maxId, SUM(status = 'accepted') AS acc FROM results WHERE run_id = ?", runId);
+  // Changes whenever the run is re-finalised or acceptances are applied/revoked.
+  const key = run ? `${run.status}|${run.finished_at}|${agg.n}|${agg.maxId}|${agg.acc}|${JSON.stringify(run.summary?.byStatus || {})}` : null;
+  const hit = askDigests.get(runId);
+  if (key && hit?.key === key && run.finished_at) return hit;
   const { text: digest, results } = buildRunDigest(runId, 20000);
-  const values = buildValueDigest(results, 14000);
+  const entry = { key, digest, values: buildValueDigest(results, 14000) };
+  if (run?.finished_at) {
+    if (askDigests.size >= 20) askDigests.delete(askDigests.keys().next().value);
+    askDigests.set(runId, entry);
+  }
+  return entry;
+}
+
+export async function askRun(runId, question, history = []) {
+  const { digest, values } = askDigest(runId);
   const id = startRecord(runId, 'chat', config.ai.textModel);
   try {
     const msgs = [

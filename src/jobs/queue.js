@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { config } from '../config.js';
-import { q, insert, update, nowIso } from '../db.js';
+import db, { q, insert, update, nowIso, transaction } from '../db.js';
 import { createLogger } from '../logger.js';
 import { executeRun, CancelledError } from '../engine/runner.js';
 import { parseSuiteConfig } from '../engine/options.js';
@@ -11,6 +11,7 @@ import { redact } from '../engine/pbi.js';
 import { analyzeRun, setAiEmitter } from '../ai/analysis.js';
 import { aiStatus } from '../ai/client.js';
 import { loadAcceptances, applyAcceptances } from './acceptances.js';
+import { writeThumbnail } from './thumbs.js';
 
 const logger = createLogger('queue');
 export const bus = new EventEmitter();
@@ -26,6 +27,10 @@ export function shortError(msg) {
   if (m) return `A step in the report timed out (${m[2].replace('Timeout ', '').replace(' exceeded', '')}): something on the page, such as an open dropdown or popup, blocked a click. See the Log tab for details.`;
   return first.length > 300 ? `${first.slice(0, 297)}…` : first;
 }
+
+// Buffered run logs of runs in progress; flushed on process exit so a shutdown loses nothing.
+const logFlushers = new Set();
+process.on('exit', () => { for (const f of logFlushers) { try { f(); } catch { /* db closing */ } } });
 
 const FAIL_STATUSES = new Set(['fail', 'missing', 'error']);
 
@@ -92,7 +97,8 @@ class RunQueue {
     return new Promise((resolve) => {
       const check = () => {
         const r = q.get('SELECT status FROM runs WHERE id = ?', runId);
-        if (r && !['queued', 'running'].includes(r.status)) { bus.off('run', onRun); resolve(r.status); }
+        // A deleted run (no row) must also settle, or this listener would stay on the bus forever.
+        if (!r || !['queued', 'running'].includes(r.status)) { bus.off('run', onRun); resolve(r ? r.status : 'deleted'); }
       };
       const onRun = (e) => { if (e.runId === runId) check(); };
       bus.on('run', onRun);
@@ -114,9 +120,24 @@ class RunQueue {
     const acceptances = loadAcceptances(run.suite_id);
     let lastProgressWrite = 0;
 
+    // Log lines are buffered and written in one transaction (live events still go out immediately).
+    const logBuf = [];
+    let logTimer = null;
+    const flushLogs = () => {
+      if (logTimer) { clearTimeout(logTimer); logTimer = null; }
+      if (!logBuf.length) return;
+      const rows = logBuf.splice(0);
+      try {
+        transaction(() => { for (const l of rows) q.run('INSERT INTO run_logs (run_id, ts, level, message) VALUES (?,?,?,?)', runId, l.ts, l.level, l.message); });
+      } catch (e) { logger.debug(`log flush for run #${runId} failed (run deleted?): ${e.message}`); }
+    };
+    logFlushers.add(flushLogs);
+    const thumbs = [];
     const log = (level, message) => {
       const ts = nowIso();
-      q.run('INSERT INTO run_logs (run_id, ts, level, message) VALUES (?,?,?,?)', runId, ts, level, String(message));
+      logBuf.push({ ts, level, message: String(message) });
+      if (logBuf.length >= 200) flushLogs();
+      else logTimer ??= setTimeout(flushLogs, 300);
       bus.emit(`run:${runId}`, { type: 'log', ts, level, message });
       if (level !== 'debug') logger[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'debug'](`#${runId} ${message}`);
     };
@@ -136,6 +157,7 @@ class RunQueue {
         if (!buf) continue;
         const file = `${String(id).padStart(4, '0')}-${k}.png`;
         await fs.promises.writeFile(path.join(dir, file), buf);
+        thumbs.push(writeThumbnail(path.join(dir, file), buf, (m) => logger.debug(m))); // small copy for lists; failure is harmless
         images[k] = file;
       }
       const row = {
@@ -197,19 +219,30 @@ class RunQueue {
         }
       }
     }
+    await Promise.allSettled(thumbs);
     const summary = { ...counts, ...engineSummary, durationMs: Date.now() - started };
-    update('runs', runId, { status, error, summary, progress: 1, phase: 'Done', finished_at: nowIso() });
     log(status === 'error' ? 'error' : 'info', `Run finished: ${status.toUpperCase()} — ${counts.total} checks in ${(summary.durationMs / 1000).toFixed(0)}s`);
+    flushLogs(); // every line must be readable by the time the run is marked finished
+    update('runs', runId, { status, error, summary, progress: 1, phase: 'Done', finished_at: nowIso() });
     bus.emit(`run:${runId}`, { type: 'done', status, summary });
     bus.emit('run', { runId, status });
 
     // AI triage runs after the run is final so it never delays or affects the verdict.
     const aiCfg = snap.config.ai || {};
     if (['passed', 'diffs', 'failed'].includes(status) && aiCfg.enabled !== false && config.ai.autoAnalyze && aiStatus().configured) {
-      log('info', `AI analysis queued (${config.ai.textModel})`);
-      analyzeRun(runId, { vision: aiCfg.vision !== false, maxVision: aiCfg.maxVisionItems ?? config.ai.maxVisionItems })
-        .catch((e) => logger.warn(`AI analysis of run #${runId} failed: ${e.message}`));
+      const s = counts.byStatus;
+      // Two reports that match in every check leave nothing to explain. A single
+      // report is still reviewed: there the review of its values is the point.
+      if (snap.suite.mode === 'compare' && !['diff', 'fail', 'missing', 'error', 'warn'].some((k) => s[k])) {
+        log('info', 'AI analysis skipped because every check passed');
+      } else {
+        log('info', `AI analysis queued (${config.ai.textModel})`);
+        analyzeRun(runId, { vision: aiCfg.vision !== false, maxVision: aiCfg.maxVisionItems ?? config.ai.maxVisionItems })
+          .catch((e) => logger.warn(`AI analysis of run #${runId} failed: ${e.message}`));
+      }
     }
+    flushLogs();
+    logFlushers.delete(flushLogs);
   }
 }
 
@@ -219,17 +252,54 @@ function statusIcon(s) {
 
 export const runQueue = new RunQueue();
 
-/** Deletes runs (and artifacts) older than the retention window. */
-export function purgeOldRuns(days = config.runRetentionDays) {
-  if (!days || days <= 0) return 0;
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-  const old = q.all(`SELECT id FROM runs WHERE queued_at < ? AND status NOT IN ('queued','running')`, cutoff);
-  for (const r of old) deleteRun(r.id);
-  if (old.length) logger.info(`Purged ${old.length} run(s) older than ${days} days`);
-  return old.length;
+const PURGE_BATCH = 20;
+const isoNow = () => new Date().toISOString();
+
+/**
+ * Housekeeping: deletes runs (and artifacts) older than the retention window, old audit-log rows
+ * (AUDIT_RETENTION_DAYS, default 180), expired sessions and published-site folders of runs that no
+ * longer exist. Files are removed asynchronously. Returns how many runs were deleted.
+ */
+export async function purgeOldRuns(days = config.runRetentionDays) {
+  let removed = 0, did = false;
+  if (days && days > 0) {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const old = q.all(`SELECT id FROM runs WHERE queued_at < ? AND status NOT IN ('queued','running')`, cutoff);
+    for (let i = 0; i < old.length; i += PURGE_BATCH) {
+      await Promise.all(old.slice(i, i + PURGE_BATCH).map((r) => deleteRunAsync(r.id)));
+    }
+    removed = old.length;
+    if (removed) { did = true; logger.info(`Purged ${removed} run(s) older than ${days} days`); }
+  }
+  try {
+    const auditDays = Number(process.env.AUDIT_RETENTION_DAYS ?? 180);
+    if (auditDays > 0) {
+      const n = Number(q.run('DELETE FROM audit_log WHERE ts < ?', new Date(Date.now() - auditDays * 86400000).toISOString()).changes);
+      if (n) { did = true; logger.info(`Purged ${n} audit-log row(s) older than ${auditDays} days`); }
+    }
+    const t = isoNow();
+    if (Number(q.run('DELETE FROM sessions WHERE expires_at < ? OR absolute_expires_at < ?', t, t).changes)) did = true;
+    // Published-site folders (data/published/<runId>) whose run is gone. Only purely numeric names are touched.
+    const pubDir = path.join(config.dataDir, 'published');
+    for (const e of await fs.promises.readdir(pubDir, { withFileTypes: true }).catch(() => [])) {
+      if (!e.isDirectory() || !/^\d+$/.test(e.name) || q.get('SELECT 1 AS x FROM runs WHERE id = ?', Number(e.name))) continue;
+      await fs.promises.rm(path.join(pubDir, e.name), { recursive: true, force: true });
+      did = true;
+      logger.info(`Removed orphaned published run folder ${e.name}`);
+    }
+    if (did) db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); // give the WAL space back after bulk deletes; no VACUUM on the hot path
+  } catch (e) { logger.warn(`Housekeeping failed: ${e.message}`); }
+  return removed;
 }
 
 export function deleteRun(runId) {
   q.run('DELETE FROM runs WHERE id = ?', runId);
   fs.rmSync(runDir(runId), { recursive: true, force: true });
+  bus.emit('run', { runId, status: 'deleted' });
+}
+
+export async function deleteRunAsync(runId) {
+  q.run('DELETE FROM runs WHERE id = ?', runId);
+  await fs.promises.rm(runDir(runId), { recursive: true, force: true });
+  bus.emit('run', { runId, status: 'deleted' });
 }
