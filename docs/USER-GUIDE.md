@@ -202,6 +202,7 @@ Click a check to open it (Figure 9):
 - **Outlined differences**: B with red boxes around each differing region.
 - Click any image to enlarge it.
 - **Data differences**: a table of the values read from the visual in A and B. Added lines are green, removed lines red, changed lines yellow.
+- **Data behind the visual**: the rows Power BI loaded for the visual, unrounded, compared between A and B. This catches a difference the screen hides, such as 1,200,001 against 1,249,999 when both show as "1.2M", or a row below the visible part of a table.
 - **AI screenshot analysis**: a short description of what changed, its severity, and whether it is probably just rendering noise.
 - Use the **← →** arrow keys (or Previous / Next) to step through checks. **Esc** closes the window.
 
@@ -370,12 +371,13 @@ The page inventory (pages added, removed, renamed or reordered) is always checke
 | **Matrix +/- expand** | Expands matrix row groups and compares the expanded data. |
 | **Cross-filtering** | Clicks data points and compares how the rest of the page reacts. |
 | **Tooltips** | Hovers data points and compares tooltip content. |
+| **Data behind each visual** | On by default. Compares the data Power BI downloads for each visual: every row it loads, unrounded. Reported with the visual it belongs to. |
 | **Data model** | Compares the two semantic models: tables, columns, measures (DAX), relationships, security roles and shared queries (see 4.12). |
 
 ![Choosing scenarios, coverage limits and AI options](images/13-suite-scenarios.jpg)
 *Figure 20. Choosing scenarios, coverage limits and AI options*
 
-**Why "same slicer values" matters.** If a slicer opens on North in A but on South in B, every visual on that page shows different numbers, and the real differences are buried under them. With this option on, the run first records the slicer itself as one finding ("Sector" opens on different values: North (A) vs South (B)), sets B to North, and only then compares the page. Every other difference on that page is then a real one. Turn it off only if you want to see how each report looks exactly as it opens.
+**Why "same slicer values" matters.** If a slicer opens on North in A but on South in B, every visual on that page shows different numbers, and the real differences are buried under them. With this option on, the run first records the slicer itself as one finding ("Sector" opens on different values: North (A) vs South (B)), sets B to North, and only then compares the page. Every other difference on that page is then a real one. Date and range slicers are handled the same way: B is given A's from and to values, and the run checks that Power BI accepted them; if it did not, the finding says the page was compared on different ranges. Turn the option off only if you want to see how each report looks exactly as it opens.
 
 **Fixed parameters** (same tab) set slicers to chosen values on **both** reports before comparing, for example to always compare one business unit. Write one per line: `Sector = North`, or several values and a page: `Region = East, West @ Sales overview`. Without a page, the parameter applies to every page with that slicer. Leave the values empty (`Region =`) to clear a slicer. A value that one report does not have is reported as a failure. Date and range slicers are not set automatically.
 
@@ -385,6 +387,7 @@ On the same tab, **coverage limits** set how much is tested (for example values 
 
 - **Max differing pixels (%)**: above this a screenshot counts as different. Raise it slightly if harmless anti-aliasing creates Diff results.
 - **Per-pixel colour tolerance**, **layout jitter (px)** and **position/size tolerance (px)**: ignore tiny rendering shifts.
+- **Small change size (px)**: in page and visual screenshots, this many differing pixels in one spot count as a difference even when they are far below the percentage above (one changed digit, one marker). Default 40; set 0 to turn it off. It does not apply to screenshots taken after an interaction, where hover and highlight effects cause small harmless differences.
 - **Numeric tolerance**: for example `0.001` treats values within 0.1% as equal (useful for rounding).
 - **Retries per scenario**: retry flaky interactions.
 - **Ignore visual types / titles**, **ignore text patterns** (for example `Last refreshed: .*`) and **mask in screenshots** (areas painted over in both screenshots): use these for content that changes every time, such as refresh dates.
