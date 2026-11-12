@@ -10,9 +10,9 @@ A self-hosted website for **end-to-end validation of Power BI reports**. Add rep
 |---|---|---|
 | **Pages** | Discovers every page in A and B | missing / extra / renamed / re-ordered pages |
 | **Health** | Scans every visual for error states | "Can't display this visual", data load failures |
-| **Page render** | Full-canvas screenshot of each page | pixel differences above threshold |
-| **Layout & inventory** | Matches visuals by type + title, then position | missing, extra, moved, resized, retitled visuals |
-| **Every visual** | Cropped screenshot + extracted content: card values, table/matrix cells, chart data points and axis labels, slicer items | pixel and **data** differences (line-level diff) |
+| **Page render** | Full-canvas screenshot of each page, kept as evidence | visual errors; pixel differences only with **Compare appearance** on |
+| **Visual inventory** | Matches visuals by type + title, then position | missing, extra, retitled visuals (moved / resized only with **Compare appearance** on) |
+| **Every visual** | Extracted content: card values, table/matrix cells, chart data points and axis labels, slicer items, plus the data behind the visual; cropped screenshot as evidence | **data** differences (line-level diff) |
 | **Buttons & navigators** | Clicks action buttons, page/bookmark navigator items | different destination page, popup vs none, different resulting state |
 | **Slicers** | Applies values (spread across the list) in A and B | different filtered page / data; value missing in B |
 | **Same slicer values** (`alignSelections`, on) | Before comparing a page, reads what each slicer has selected in A and B and sets B to A's values; optional fixed `parameters` (e.g. `Region = South`) are set on both | a slicer that opens on different values, reported once (`selections`), so the visuals after it are compared on the same selection; a fixed parameter value missing in a report |
@@ -94,7 +94,8 @@ With a free [NVIDIA API key](https://build.nvidia.com) in `.env` (`NVIDIA_API_KE
 |---|---|---|
 | **Executive summary & triage**: headline, risk level, findings grouped and ranked by severity, likely root causes (dataset refresh, DAX/measure change, filter/RLS, layout edit, broken navigation), what's probably noise, next steps | `nvidia/nemotron-3-ultra-550b-a55b` | Run → **AI insights** |
 | **Data-anomaly review**: totals that don't reconcile with breakdowns, percentages that don't add up, unexpected blanks/zeros, implausible values, unusual A→B shifts | same | Run → **AI insights** |
-| **Screenshot explanations**: a vision model compares the A/B screenshots of the top differences and describes what visibly changed, flagging likely rendering noise | `nvidia/nemotron-3.5-super-vl-120b-a12b` | Each result → **AI screenshot analysis** |
+| **Value differences explained**: for every visual whose values differ, what changed (exact before → after, with the difference worked out by the tool), the pattern across the changed values, and the likely cause. Written from the values, not from the pictures | same text model | Run → **AI insights**, and each result → **AI explanation** |
+| **Look-only differences from screenshots** (off by default, per suite): checks whose values are the same but that look different are described by a vision model | `nvidia/nemotron-3.5-super-vl-120b-a12b` | Each result → **AI explanation** |
 | **Ask AI**: chat with a run ("Which slicer values broke?", "Is the total difference real or rounding?"), with answers citing `#check` numbers you can click | text model | Run → **Ask AI** |
 
 AI output is included in the PDF, Excel and HTML exports. It never changes a run's pass/fail verdict; the deterministic checks stay the source of truth.
@@ -129,7 +130,8 @@ Suites can also run on a **cron schedule** (set it in the suite editor).
 ## Tuning for noisy reports
 * **Ignore text patterns** (regex) for "Last refreshed …" stamps, and **ignore visuals by title**, e.g. `/refresh/i`.
 * **Mask in screenshots** (CSS selectors) for animated or custom visuals.
-* **Max differing pixels %**, **per-pixel colour tolerance**, **layout-jitter tolerance**, which ignores the 1px anti-aliasing and sub-pixel text shifts Power BI produces between loads, and **numeric tolerance** for rounding.
+* **Results are decided by values, not pictures.** By default screenshots are evidence only, and the size and position of visuals are not compared, so a visual that is larger, moved or styled differently is not a difference. Turn on **Compare appearance** in a suite to also compare screenshots pixel by pixel and report moved or resized visuals.
+* With **Compare appearance** on: **Max differing pixels %**, **per-pixel colour tolerance**, **layout-jitter tolerance**, which ignores the 1px anti-aliasing and sub-pixel text shifts Power BI produces between loads, and **numeric tolerance** for rounding.
 * **Pages include/exclude** (name or `/regex/`), e.g. exclude tooltip or drill-through pages.
 * **Selector overrides (JSON)**: if Microsoft changes the report DOM, patch the selectors per suite without a code change (`src/engine/selectors.js` lists every key).
 
@@ -173,4 +175,4 @@ src/api/      routes.js (REST + SSE) · auth.js · admin.js      public/   Preac
 ## Known limits
 * Data checks read what Power BI renders: visible table/matrix rows (virtualised rows beyond the viewport aren't scrolled), chart data-point labels, and card text. The data model check compares the model's definition (DAX, columns, relationships), not the rows in it.
 * Range/date slicers are captured in page and visual checks, but values aren't typed into them.
-* Custom visuals that draw on `<canvas>` are compared by pixels only.
+* Custom visuals that draw on `<canvas>` have no readable values: they are marked **Skipped** unless **Compare appearance** is on, which compares them by pixels.

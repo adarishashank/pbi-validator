@@ -173,7 +173,7 @@ The run page (Figure 8) shows the result, who started it and when at the top, th
 
 - The run opens on **Problems**: only the checks that need attention. Click **All** to see every check, or a status chip (Fail, Missing, Diff…) to see only those.
 - Below the chips, filter by **scenario** (Visual, Button, Slicer…), by **page**, or search titles.
-- Checks are grouped by report page. Each row shows the status, the scenario, the title, small screenshots and the percentage of pixels that differ.
+- Checks are grouped by report page. Each row shows the status, the scenario, the title and small screenshots. When the suite compares appearance (see 4.4), it also shows the percentage of pixels that differ.
 - The tabs switch between **What changed** (comparisons only, see 3.8), **Results**, **AI insights**, **Ask AI**, **Coverage** (a table of statuses per scenario) and **Log** (technical progress messages).
 
 ![A run, filtered to the checks that need attention](images/05-run-problems.jpg)
@@ -184,7 +184,7 @@ Each check has a status:
 | Status | Meaning | What to do |
 |---|---|---|
 | **Pass** | A and B match (within the suite's tolerances). | Nothing. |
-| **Diff** | Screenshots or values differ. | Look at the images and data: intended change or a mistake? |
+| **Diff** | Values or content differ. Screenshots count only when the suite compares appearance. | Look at the data differences: intended change or a mistake? |
 | **Fail** | Behaviour differs, for example a button goes to a different page. | Investigate; usually a defect. |
 | **Missing** | A page or visual exists on one side only. | Check whether it was removed or renamed on purpose. |
 | **Warning** | Something unusual that is not a definite failure, for example an interaction with no visible effect. | Review when convenient. |
@@ -196,14 +196,13 @@ Each check has a status:
 
 Click a check to open it (Figure 9):
 
-- **Side by side**: A, B, and B with the differing areas outlined in red.
-- **Swipe**: drag the slider to wipe between A and B. Good for small shifts.
-- **Pixel diff**: differing pixels highlighted in red.
-- **Outlined differences**: B with red boxes around each differing region.
+- **Side by side**: the screenshots of A and B. They are evidence: by default they are not compared, so a visual that is larger, moved or styled differently in B is not a difference.
+- **Swipe**: drag the slider to wipe between A and B.
+- **Pixel diff** and **Outlined differences**: only when the suite compares appearance (see 4.4). Differing pixels in red, and B with red boxes around each differing region.
 - Click any image to enlarge it.
 - **Data differences**: a table of the values read from the visual in A and B. Added lines are green, removed lines red, changed lines yellow.
 - **Data behind the visual**: the rows Power BI loaded for the visual, unrounded, compared between A and B. This catches a difference the screen hides, such as 1,200,001 against 1,249,999 when both show as "1.2M", or a row below the visible part of a table.
-- **AI screenshot analysis**: a short description of what changed, its severity, and whether it is probably just rendering noise.
+- **AI explanation**: what happened to the values of this check, in plain words: the exact before → after figures, the pattern across the changed values (for example "every number moved by the same factor"), the likely cause, and a severity. It is written from the values, not from the screenshots. A check whose values are the same and that only looks different says so, without asking the AI.
 - Use the **← →** arrow keys (or Previous / Next) to step through checks. **Esc** closes the window.
 
 ![One check: side-by-side screenshots and the AI explanation](images/06-result-detail.jpg)
@@ -216,14 +215,18 @@ When AI analysis is available, the **AI insights** tab summarises the run (Figur
 - A one-line **verdict** and a **risk level** (none, low, medium, high, critical).
 - A short **summary** written for a release manager.
 - **Likely root causes**, for example "Dataset refresh or measure/DAX change", with confidence and the checks behind them. Click a number like **#11** to open that check.
-- **Next steps**, **Triaged findings** grouped by severity, **Data anomalies** (numbers that look inconsistent), and **Probably noise** (differences that are likely harmless).
+- **Next steps** and **Triaged findings** grouped by severity.
+- **Value differences explained**: one row per visual whose values differ, with what happened to the values, the pattern, the likely cause and a link to the check, followed by the changes that are the same change seen in several visuals (a card total and the bars of a chart moving by the same factor).
+- **Data anomalies** (numbers that look inconsistent), and **Looks different, same values** (checks where no value changed).
+
+**The AI works from values, not from pictures.** It is given every changed value with its row, its before and after, and the difference and percentage already worked out by the tool, so it never reads a number off a screenshot or does the arithmetic itself. A check where the values match and only the look differs is treated as cosmetic. A check where no values could be read is reported as "picture only", so you know its numbers were not verified.
 
 ![AI insights: verdict, risk, summary and likely root causes](images/07-ai-insights.jpg)
 *Figure 10. AI insights: verdict, risk, summary and likely root causes*
 
 On the **Ask AI** tab you can ask questions in plain English, for example "Which numbers changed on the Overview page?" or "Why did the Region slicer check fail?". Answers refer to the checks they are based on.
 
-> **Important:** AI output can be wrong. Treat it as a helpful starting point and confirm important conclusions with the screenshots and data differences.
+> **Important:** AI output can be wrong. Treat it as a helpful starting point and confirm important conclusions with the data differences of each check.
 
 ### 3.6 Exporting and sharing
 
@@ -270,7 +273,7 @@ At the top, **Action items for the Power BI team** lists what to look into first
 Click a page tile to open that page (Figure 14):
 
 - **Compared on**: the slicer values both reports showed when this page was compared, for example Region = North · Year = 2026. "(B set to A)" means B opened on other values and was aligned first; a table with **differs** means the two sides could not be put on the same values, so read the differences below with care.
-- **Layout**: visuals added, removed, moved, resized or retitled.
+- **Layout**: visuals added, removed or retitled (and moved or resized, when the suite compares appearance).
 - **Visuals**: every visual that looks or reads differently. Click its name to see each changed value: the **Row** it belongs to (for example JAN · North), **A (before)** in red and **B (after)** in green. Rows that are the same in both are left out. "No data change" means only the picture differs.
 - **Slicers that open on different values**: the slicer, what A and B show when the page opens, and the values both were set to before comparing.
 - **Interactions that behave differently**: for example a button that goes to another page, or a drill that shows other numbers at level 2.
@@ -360,9 +363,9 @@ The page inventory (pages added, removed, renamed or reordered) is always checke
 
 | Scenario | What it checks |
 |---|---|
-| **Page render** | Full-page screenshot of every page, plus visual errors. |
-| **Layout & inventory** | Visuals missing, added, moved, resized or retitled. |
-| **Every visual** | A screenshot and the data of each visual (cards, tables, matrices, chart values). |
+| **Page render** | Full-page screenshot of every page (kept as evidence), plus visual errors. |
+| **Visual inventory** | Visuals missing, added or retitled. |
+| **Every visual** | The values of each visual (cards, tables, matrices, chart values), with its screenshot as evidence. |
 | **Buttons & navigators** | Clicks buttons and page/bookmark navigators and checks where they go and what changes. |
 | **Slicers** | Applies slicer values and compares the filtered page and data. |
 | **Same slicer values on both sides** | On by default. Before a page is compared, B's slicers are set to the values selected in A, so both pages show the same selection. A slicer that opens on different values is reported once, on its own (see below). |
@@ -372,7 +375,10 @@ The page inventory (pages added, removed, renamed or reordered) is always checke
 | **Cross-filtering** | Clicks data points and compares how the rest of the page reacts. |
 | **Tooltips** | Hovers data points and compares tooltip content. |
 | **Data behind each visual** | On by default. Compares the data Power BI downloads for each visual: every row it loads, unrounded. Reported with the visual it belongs to. |
+| **Compare appearance** | Off by default. On: screenshots are also compared pixel by pixel, and visuals that moved or changed size are reported. |
 | **Data model** | Compares the two semantic models: tables, columns, measures (DAX), relationships, security roles and shared queries (see 4.12). |
+
+**Results are decided by values, not by pictures.** A check is a difference when a value, a row, a label, a page, a visual or a behaviour differs. How a visual looks does not count: a visual that is larger, smaller, moved or styled differently in B passes as long as its values match. When a visual has a different size in B it can draw fewer rows, labels or axis marks; if the data behind it is identical, that is not counted either, and the check says so. A visual from which no values can be read (for example a map drawn as a picture) is marked **Skipped** with a note, because nothing but its picture could be compared. Turn on **Compare appearance** only if you also want to be told about differences in look, size and position.
 
 ![Choosing scenarios, coverage limits and AI options](images/13-suite-scenarios.jpg)
 *Figure 20. Choosing scenarios, coverage limits and AI options*
@@ -381,10 +387,11 @@ The page inventory (pages added, removed, renamed or reordered) is always checke
 
 **Fixed parameters** (same tab) set slicers to chosen values on **both** reports before comparing, for example to always compare one business unit. Write one per line: `Sector = North`, or several values and a page: `Region = East, West @ Sales overview`. Without a page, the parameter applies to every page with that slicer. Leave the values empty (`Region =`) to clear a slicer. A value that one report does not have is reported as a failure. Date and range slicers are not set automatically.
 
-On the same tab, **coverage limits** set how much is tested (for example values per slicer, buttons per page, **drill depth** and **data points drilled per visual**): higher is more thorough but slower (see 4.12 for how much slower). **AI analysis** options turn on the automatic AI summary after each run and AI explanations of screenshot differences.
+On the same tab, **coverage limits** set how much is tested (for example values per slicer, buttons per page, **drill depth** and **data points drilled per visual**): higher is more thorough but slower (see 4.12 for how much slower). **AI analysis** options turn on the automatic AI analysis of the values after each run and, if you want it, a description of look-only differences from screenshots (off by default).
 
 #### Tolerances & ignores
 
+- The pixel, jitter, position/size and small-change settings below are used only when **Compare appearance** is on.
 - **Max differing pixels (%)**: above this a screenshot counts as different. Raise it slightly if harmless anti-aliasing creates Diff results.
 - **Per-pixel colour tolerance**, **layout jitter (px)** and **position/size tolerance (px)**: ignore tiny rendering shifts.
 - **Small change size (px)**: in page and visual screenshots, this many differing pixels in one spot count as a difference even when they are far below the percentage above (one changed digit, one marker). Default 40; set 0 to turn it off. It does not apply to screenshots taken after an interaction, where hover and highlight effects cause small harmless differences.
@@ -452,7 +459,8 @@ The check now shows **Accepted**, with who accepted it, when and why (Figure 23)
 ### 4.8 AI analysis
 
 - On the **AI insights** tab, click **Analyse with AI** (or **↻ Re-analyse** for a new analysis after changes).
-- In a check, **Explain with AI** describes the screenshot difference; **↻ Re-explain** asks again.
+- In a check, **Explain with AI** explains the difference from its values. For a whole-page check it explains what differs in the visuals of that page. After an analysis, the checks with different values are explained already.
+- Screenshots are not sent to the AI unless the suite turns on **Also describe look-only differences from screenshots** (Scenarios tab, AI analysis). Then only checks whose values are the same but that look different are sent, up to the number set there.
 - Viewers can read the analysis and use **Ask AI**, but only editors can start a new analysis.
 
 ### 4.9 Sharing results
@@ -527,7 +535,8 @@ Each extra level is one more click and comparison per visual, roughly **3 to 10 
 | **"Your session ended"** | You were signed out (inactivity or a password change). Sign in again; you return to the page you were on. |
 | **I can't see buttons to add or run things** | You are a viewer. Ask your administrator for the editor role. |
 | **A run fails with "Redirected to sign-in"** | The Power BI sign-in expired. An editor signs in or imports it again (4.2), then re-runs. |
-| **Many tiny "Diff" results (fractions of a percent)** | Rendering noise. Raise "Max differing pixels" or "layout jitter", or mask the changing area, then re-run. |
+| **Many tiny "Diff" results (fractions of a percent)** | This only happens when **Compare appearance** is on: it is rendering noise. Turn the option off to judge by values only, or raise "Max differing pixels" or "layout jitter", or mask the changing area, then re-run. |
+| **A visual is "Skipped: no values could be read"** | Nothing in the visual could be read as text or data (for example a map or a picture), and screenshots are not compared by default. Look at its two screenshots yourself, or turn on **Compare appearance** for that suite. |
 | **An intended change is flagged in every run** | Open the check and click **Accept as expected** (editors, see 4.7). |
 | **A check is "Accepted" but should not be** | Open it and click **Stop accepting**, or use the suite's Accepted differences tab. |
 | **A scheduled run did not happen** | Check the schedule on the suite card (times are India Standard Time). A run more than 24 hours late is skipped rather than run late. |
@@ -561,7 +570,7 @@ For anything else, contact your administrator: **Shashank Adari** (shashank.adar
 | **Masking** | Painting over an area in both screenshots so it is not compared. |
 | **Noise** | Harmless differences such as anti-aliasing or a refresh timestamp. |
 | **Schedule** | A cron expression on a suite that starts it automatically, for example 0 6 * * 1-5 for weekdays at 06:00 India time. |
-| **Pixel diff** | The share of pixels that differ between two screenshots. |
+| **Pixel diff** | The share of pixels that differ between two screenshots. Only measured when a suite compares appearance. |
 | **Publish to web** | A public Power BI link (…/view?r=…) that needs no sign-in. |
 | **Temporary password** | A generated password for first sign-in or a reset; works once and expires after 72 hours. |
 | **Trends** | Charts of a suite's results over time. |
