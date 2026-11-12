@@ -5,7 +5,7 @@ import { Topbar } from './common.js';
 // Tab-only panels load on first use.
 const AiInsights = lazy(() => import('./ai.js'), 'AiInsights');
 const AiChat = lazy(() => import('./ai.js'), 'AiChat');
-const VisionPanel = lazy(() => import('./ai.js'), 'VisionPanel');
+const ExplainPanel = lazy(() => import('./ai.js'), 'ExplainPanel');
 const PublishControl = lazy(() => import('./publish.js'), 'PublishControl');
 const WhatChanged = lazy(() => import('./changes.js'), 'WhatChanged');
 
@@ -119,7 +119,7 @@ function ResultView({ r: initial, run, ai, reloadAi, onChanged }) {
     ${mode === 'annot' && im.annotated && html`<${Fig} src=${img(run.id, im.annotated)} cap="B with differing regions outlined" />`}
     ${!hasPair && (im.a || im.b) && html`<div class="cmp-grid">${im.a && html`<${Fig} src=${img(run.id, im.a)} cap=${capA} />`}${im.b && html`<${Fig} src=${img(run.id, im.b)} cap=${capB} />`}</div>`}
 
-    <${VisionPanel} result=${r} ai=${ai} onUpdated=${reloadAi} />
+    <${ExplainPanel} result=${r} ai=${ai} onUpdated=${reloadAi} />
     ${d.outcome && html`<div class="panel panel-b stack" style="gap:4px"><b>Button outcome</b><${Outcome} o=${d.outcome.A} name="A" />${d.outcome.B && html`<${Outcome} o=${d.outcome.B} name="B" />`}</div>`}
     ${d.value && html`<div class="muted">Slicer value applied: <b>${d.value}</b></div>`}
     ${d.dataPoint && html`<div class="muted">Data point clicked: A <code>${d.dataPoint.A}</code>${d.dataPoint.B !== undefined ? html` · B <code>${d.dataPoint.B}</code>` : ''}</div>`}

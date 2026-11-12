@@ -101,16 +101,47 @@ test('a row that is not on screen but differs is a difference', { timeout: 300_0
 });
 
 test('a few solid pixels in a large visual are a difference in still screenshots', { timeout: 300_000 }, async () => {
-  const { results } = await run('dot', 'x=1', 'diff=dot');
+  // Pictures are compared only when the suite compares appearance.
+  const look = { scenarios: { appearance: true } };
+  const { results } = await run('dot', 'x=1', 'diff=dot', look);
   const card = visual(results, /Revenue/);
   assert.equal(card.status, 'diff', dump(results));
+  assert.ok(card.images.diff && card.images.annotated, 'the differing pixels are shown');
   assert.ok(card.diff_ratio < 0.002, `below the share-of-pixels limit (${card.diff_ratio})`);
   assert.equal(card.details.pixel.smallChange, true);
   assert.ok(card.details.pixel.maxRegionPixels >= 40 && card.details.pixel.maxRegionPixels <= 64, String(card.details.pixel.maxRegionPixels));
   assert.equal(results.find((r) => r.scenario === 'page_render').status, 'diff');
   // 0 switches the rule off.
-  const off = await run('dot-off', 'x=1', 'diff=dot', { thresholds: { minRegionPixels: 0 } });
+  const off = await run('dot-off', 'x=1', 'diff=dot', { ...look, thresholds: { minRegionPixels: 0 } });
   assert.equal(visual(off.results, /Revenue/).status, 'pass', dump(off.results));
+  // By default the values decide: the same numbers with a different picture pass.
+  const values = await run('dot-values', 'x=1', 'diff=dot');
+  assert.deepEqual(values.results.filter((r) => r.status !== 'pass').map((r) => r.title), [], dump(values.results));
+  assert.equal(visual(values.results, /Revenue/).diff_ratio, null, 'the screenshots are kept but not compared');
+  assert.ok(visual(values.results, /Revenue/).images.a && visual(values.results, /Revenue/).images.b);
+});
+
+test('a visual that is larger, smaller or moved is not a difference: its values decide', { timeout: 300_000 }, async () => {
+  const { results } = await run('size', 'x=1', 'diff=size,short');
+  assert.deepEqual(results.filter((r) => r.status !== 'pass').map((r) => r.title), [], dump(results));
+  assert.deepEqual(results.find((r) => r.scenario === 'structure').details.issues, []);
+  // The lower table draws one row less. The data behind it is the same six rows.
+  const table = visual(results, /Orders/);
+  assert.equal(table.details.data.equal, false);
+  assert.equal(table.details.query.equal, true);
+  assert.equal(table.details.drawnDifferently, true);
+  assert.match(table.details.note, /data behind this visual is identical \(6 rows\).*different size in B \(400×150 in A, 400×90 in B\)/);
+  // A value that differs is still found in a visual that changed size.
+  const round = await run('size-round', 'x=1', 'diff=size,round');
+  assert.equal(visual(round.results, /Revenue/).status, 'diff', dump(round.results));
+  // A row missing from a visual of the same size is a difference in what is shown.
+  const fewer = await run('fewer', 'x=1', 'diff=fewer');
+  assert.equal(visual(fewer.results, /Orders/).status, 'diff', dump(fewer.results));
+  // Comparing appearance reports the size, the position and the pictures as well.
+  const look = await run('size-look', 'x=1', 'diff=size,short', { scenarios: { appearance: true } });
+  assert.deepEqual([...new Set(look.results.find((r) => r.scenario === 'structure').details.issues.map((i) => i.kind))].sort(), ['moved', 'resized']);
+  assert.equal(visual(look.results, /Orders/).status, 'diff');
+  assert.equal(look.results.find((r) => r.scenario === 'page_render').status, 'diff');
 });
 
 test('repeated labels are kept: two "5" labels against one is a difference', { timeout: 300_000 }, async () => {

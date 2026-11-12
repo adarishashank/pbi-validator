@@ -68,7 +68,8 @@ test('A vs B: every scenario detects the planted regressions', { timeout: 600000
   const card = find(results, 'visual', (r) => r.page === 'Overview' && /Total Sales/.test(r.title))[0];
   assert.equal(card.status, 'diff', 'card value change detected');
   assert.ok(card.details.data.ops.some((o) => o.op === 'chg' && o.a === '280,000' && o.b === '285,285'), JSON.stringify(card.details.data));
-  assert.ok(card.images.a && card.images.b && card.images.diff && card.images.annotated, 'diff screenshots produced');
+  // Screenshots are kept as evidence; they are compared only when a suite compares appearance.
+  assert.ok(card.images.a && card.images.b && !card.images.diff && card.diff_ratio == null, 'screenshots kept, not compared');
   for (const f of Object.values(card.images)) assert.ok(fs.existsSync(path.join(tmp, 'runs', String(runId), f)));
 
   const chart = find(results, 'visual', (r) => r.page === 'Overview' && /Sales by Region/.test(r.title))[0];

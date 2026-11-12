@@ -11,7 +11,7 @@ export function loadRunBundle(runId) {
   const results = q.all('SELECT * FROM results WHERE run_id = ? ORDER BY seq', runId);
   const logs = q.all('SELECT ts, level, message FROM run_logs WHERE run_id = ? ORDER BY id', runId);
   const ai = getRunAi(runId);
-  return { run, results, logs, ai: { summary: ai.summary, anomalies: ai.anomalies, vision: ai.vision, chat: ai.chat } };
+  return { run, results, logs, ai: { summary: ai.summary, anomalies: ai.anomalies, values: ai.values, explain: ai.explain, chat: ai.chat } };
 }
 
 const xmlEsc = (s) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
@@ -119,13 +119,15 @@ $('#sub').textContent=[ 'Status: '+D.run.status.toUpperCase(), rp.A?'A: '+rp.A.n
 const by=(k)=>[...new Set(R.map(r=>r[k]).filter(Boolean))];
 const cnt={};R.forEach(r=>cnt[r.status]=(cnt[r.status]||0)+1);
 const AI=D.ai||{};const S=AI.summary&&AI.summary.status==='done'?AI.summary.content:null;const AN=AI.anomalies&&AI.anomalies.status==='done'?AI.anomalies.content:null;
-if(S||AN){let h='<div class="card" style="border-left:4px solid #6d28d9"><h3>🤖 AI analysis <span class="badge" style="color:#6d28d9">'+esc(S?S.risk:'')+' risk</span></h3><div class="meta">'+esc((AI.summary&&AI.summary.model)||'')+'</div>';
+const VA=AI.values&&AI.values.status==='done'?AI.values.content:null;
+if(S||AN||VA){let h='<div class="card" style="border-left:4px solid #6d28d9"><h3>🤖 AI analysis <span class="badge" style="color:#6d28d9">'+esc(S?S.risk:'')+' risk</span></h3><div class="meta">'+esc((AI.summary&&AI.summary.model)||'')+'</div>';
 if(S){h+='<p><b>'+esc(S.headline)+'</b></p><p>'+esc(S.summary)+'</p>';if((S.findings||[]).length)h+='<table><tr><td><b>Severity</b></td><td><b>Finding</b></td></tr>'+S.findings.map(f=>'<tr><td>'+esc(f.severity)+'</td><td><b>'+esc(f.title)+'</b> — '+esc(f.explanation)+'<br><i>'+esc(f.recommendation||'')+'</i> '+(f.resultRefs||[]).map(x=>'#'+x).join(' ')+'</td></tr>').join('')+'</table>';
 if((S.rootCauses||[]).length)h+='<details open><summary>Likely root causes</summary><ul>'+S.rootCauses.map(c=>'<li>'+esc(c.cause)+' ('+esc(c.confidence)+') — '+esc(c.evidence)+'</li>').join('')+'</ul></details>';
 if((S.nextSteps||[]).length)h+='<details open><summary>Next steps</summary><ol>'+S.nextSteps.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ol></details>';}
+if(VA&&(VA.changes||[]).length){h+='<details open><summary>Value differences explained ('+VA.changes.length+')</summary><p>'+esc(VA.assessment||'')+'</p><ul>'+VA.changes.map(c=>'<li><b>'+esc(c.visual)+'</b> ('+esc(c.page)+') #'+c.resultRef+': '+esc(c.whatChanged)+(c.likelyCause?' <i>Likely cause: '+esc(c.likelyCause)+'</i>':'')+'</li>').join('')+'</ul></details>';}
 if(AN){h+='<details open><summary>Data anomalies ('+(AN.anomalies||[]).length+')</summary><p>'+esc(AN.assessment||'')+'</p><ul>'+(AN.anomalies||[]).map(a=>'<li><b>'+esc(a.severity)+'</b> '+esc(a.page)+' · '+esc(a.visual)+': '+esc(a.issue)+' <i>'+esc(a.evidence)+'</i></li>').join('')+'</ul></details>';}
 $('#ai').innerHTML=h+'</div>';}
-const VIS=AI.vision||{};
+const VIS=AI.explain||AI.vision||{};
 $('#chips').innerHTML=Object.entries(cnt).map(([s,n])=>'<span class="chip s-'+s+'">'+s+': '+n+'</span>').join('');
 by('status').forEach(s=>$('#fs').insertAdjacentHTML('beforeend','<option>'+esc(s)+'</option>'));
 by('scenario').forEach(s=>$('#fc').insertAdjacentHTML('beforeend','<option>'+esc(s)+'</option>'));
@@ -134,7 +136,7 @@ const LBL={a:'A · '+(rp.A?rp.A.name:'report'),b:'B · '+(rp.B?rp.B.name:'report
 function ops(d){if(!d||!d.ops||d.equal)return'';return'<table>'+d.ops.map(o=>o.op==='skip'?'<tr><td colspan=2 style="color:#888">… '+o.count+' identical lines …</td></tr>':'<tr class="'+o.op+'"><td>'+esc(o.a??'')+'</td><td>'+esc(o.b??'')+'</td></tr>').join('')+'</table>';}
 function card(r){const d=r.details||{};let h='<div class="card"><h3><span class="badge s-'+r.status+'">'+r.status+'</span>'+esc(r.title)+'</h3><div class="meta">'+esc(r.scenario)+(r.diff_ratio!=null?' · '+(r.diff_ratio*100).toFixed(3)+'% pixels differ':'')+(d.note?' · '+esc(d.note):'')+'</div>';
 const im=Object.entries(r.images||{});if(im.length)h+='<div class="imgs">'+im.map(([k,f])=>'<figure><figcaption>'+esc(LBL[k]||k)+'</figcaption><img loading="lazy" src="'+f+'"></figure>').join('')+'</div>';
-const v=VIS[r.id];if(v&&v.status==='done')h+='<div class="meta" style="color:#6d28d9;margin-top:8px">🤖 '+esc(v.content.whatChanged)+(v.content.likelyNoise?' (likely rendering noise)':'')+'</div>';
+const v=VIS[r.id];if(v&&v.status==='done')h+='<div class="meta" style="color:#6d28d9;margin-top:8px">🤖 '+esc(v.content.whatChanged)+(v.content.likelyCause?' Likely cause: '+esc(v.content.likelyCause):'')+'</div>';
 if(d.data&&!d.data.equal)h+='<details open><summary>Data differences (+'+d.data.added+' / −'+d.data.removed+')</summary>'+ops(d.data)+'</details>';
 if(d.query&&!d.query.equal)h+='<details open><summary>Data behind the visual differs (+'+d.query.added+' / −'+d.query.removed+' rows, unrounded)</summary>'+ops(d.query)+'</details>';
 if(d.dataDiffs&&d.dataDiffs.length)h+='<details><summary>'+d.dataDiffs.length+' visual(s) with different data after the interaction</summary>'+d.dataDiffs.map(x=>'<div><b>'+esc(x.visual)+'</b>'+(x.only?' — only in '+x.only:'')+ops({ops:x.ops||[]})+'</div>').join('')+'</details>';

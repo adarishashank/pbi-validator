@@ -559,7 +559,7 @@ async function processPage(env) {
 
   // Structure ----------------------------------------------------------
   if (cfg.scenarios.structure && compare && recordStatic) {
-    const issues = structuralDiff(state.match, cfg.thresholds);
+    const issues = structuralDiff(state.match, cfg.thresholds, { layout: cfg.scenarios.appearance });
     const inventory = state.match.pairs.map((p) => ({ visual: visualLabel(p.a), type: p.a.type, matchedBy: p.how, boxA: p.a.box, boxB: p.b.box }));
     await ctx.record({
       page: pageName, scenario: 'structure', target: 'layout',
@@ -586,7 +586,7 @@ async function processPage(env) {
       if (compare && p.b && cfg.scenarios.queryData) {
         const [qa, qb] = await Promise.all([S.A.report.queryData(p.a), S.B.report.queryData(p.b)]);
         if (qa && qb && !qa.error && !qb.error) {
-          query = { ...diffLines(qa.lines, qb.lines, { numericTolerance: cfg.thresholds.numericTolerance, normalize, cap: 5000 }), rowsA: qa.rows, rowsB: qb.rows, complete: !!(qa.complete && qb.complete) };
+          query = { ...diffLines(qa.lines, qb.lines, { numericTolerance: cfg.thresholds.numericTolerance, normalize, cap: 5000 }), rowsA: qa.rows, rowsB: qb.rows, complete: !!(qa.complete && qb.complete), ...(qa.fields?.length ? { fields: qa.fields } : {}) };
         }
       }
       // Text read from the screen stops at what is drawn (and at the reading limits).
@@ -596,6 +596,23 @@ async function processPage(env) {
       if (query && !query.equal) {
         res.status = 'diff';
         if (data?.equal) res.details.note = 'The text on screen is the same, but the data behind this visual differs (values rounded on screen, or rows not shown)';
+      }
+      if (compare && p.b && !cfg.scenarios.appearance) {
+        const resized = Math.max(Math.abs(p.a.box.w - p.b.box.w), Math.abs(p.a.box.h - p.b.box.h)) > cfg.thresholds.positionTolerancePx;
+        if (query?.equal && data && !data.equal && resized) {
+          // Same data, different size: a smaller visual draws fewer rows, labels
+          // and axis marks. The data behind it decides.
+          res.status = 'pass';
+          res.details.drawnDifferently = true;
+          res.details.note = `The data behind this visual is identical (${query.rowsA} rows). The text on screen differs because the visual has a different size in B (${Math.round(p.a.box.w)}×${Math.round(p.a.box.h)} in A, ${Math.round(p.b.box.w)}×${Math.round(p.b.box.h)} in B), so it draws a different number of rows, labels or axis marks. Not counted as a difference.`;
+        } else if (!query && data && !data.totalA && !data.totalB && !isSlicerVisual(sel, p.a) && !NO_VALUES.test(p.a.type || '')) {
+          // A visual that should show data, with nothing to read on either
+          // side, and pictures are not compared: say that it was not checked.
+          // (Buttons, text boxes and slicers have no data of their own; slicer
+          // selections are compared on their own.)
+          res.status = 'skipped';
+          res.details.note = 'No values could be read from this visual, so it was not compared. Its screenshots are kept. Turn on "Compare appearance" to compare how it looks.';
+        }
       }
       if (p.a.error || p.b?.error) { res.status = 'fail'; res.details.error = { A: p.a.error, B: p.b?.error }; }
       await ctx.record(res);
@@ -1148,6 +1165,9 @@ function describeOutcome(o) {
   return 'stayed on page';
 }
 
+/** Visual types that carry no data of their own: nothing to read is expected there. */
+const NO_VALUES = /button|navigator|textbox|shape|image/i;
+
 /** Picks n values evenly spread across a list (first, ..., last). */
 function spread(list, n) {
   if (list.length <= n) return list;
@@ -1157,7 +1177,7 @@ function spread(list, n) {
   return [...new Set(out)];
 }
 
-/** Builds a result with pixel comparison between two optional images. */
+/** Builds a result with its two screenshots, compared pixel by pixel when the suite compares appearance. */
 /**
  * `solid` (still screenshots only): a small but connected changed area counts
  * as a difference even when it is a tiny share of the image. Not used after
@@ -1168,7 +1188,9 @@ function imageResult({ a, b, compare, cfg, details = {}, solid = false, ...rest 
   const res = { ...rest, status: 'pass', images: {}, details };
   if (a) res.images.a = a;
   if (b) res.images.b = b;
-  if (compare && a && b) {
+  // Screenshots are evidence. They are compared only when the suite compares
+  // appearance; otherwise values, content and behaviour decide the check.
+  if (compare && a && b && cfg.scenarios.appearance) {
     const d = diffImages(a, b, { threshold: cfg.thresholds.pixelThreshold, shiftTolerancePx: cfg.thresholds.shiftTolerancePx });
     res.diffRatio = d.ratio;
     res.diffPixels = d.diffPixels;

@@ -3,9 +3,9 @@ import { Badge, Modal, Field, Check, act, confirmDialog, Empty } from '../ui.js'
 import { Topbar, SummaryChips } from './common.js';
 
 const SCENARIOS = [
-  ['pageRender', 'Page render', 'Full-page screenshot pixel diff + render health (visual errors)'],
-  ['structure', 'Layout & inventory', 'Missing / extra / moved / resized / retitled visuals'],
-  ['visuals', 'Every visual', 'Per-visual screenshot diff + extracted data (cards, tables, matrices, chart points)'],
+  ['pageRender', 'Page render', 'Full-page screenshot of every page (kept as evidence) + render health (visual errors)'],
+  ['structure', 'Visual inventory', 'Missing / extra / retitled visuals'],
+  ['visuals', 'Every visual', 'The values of each visual (cards, tables, matrices, chart points), with its screenshot as evidence'],
   ['buttons', 'Buttons & navigators', 'Clicks action buttons, page/bookmark navigators; verifies destination & resulting state'],
   ['slicers', 'Slicers', 'Applies slicer values and compares the whole filtered page + data'],
   ['drill', 'Hierarchy drill', 'Drills down / expands hierarchies level by level (e.g. Year → Quarter → Month) and compares every level'],
@@ -15,6 +15,7 @@ const SCENARIOS = [
   ['tooltips', 'Tooltips', 'Hovers data points and compares tooltip content'],
   ['queryData', 'Data behind each visual', 'Compares the data Power BI downloads for each visual: every row it loads, unrounded. Catches differences hidden by rounding (1.2M) or in rows that are not on screen'],
   ['alignSelections', 'Same slicer values on both sides', 'Before comparing a page, sets B’s slicers to the values selected in A. A slicer that opens on different values is reported once as its own finding instead of making every visual differ'],
+  ['appearance', 'Compare appearance', 'Off by default: results are decided by values, content and behaviour, so a visual that is larger, moved or styled differently is not a difference. On: screenshots are also compared pixel by pixel, and moved or resized visuals are reported'],
   ['model', 'Data model', 'Compares tables, columns, measures (DAX), relationships and security roles of the two semantic models (uploaded model file or Power BI API)'],
 ];
 const LIMITS = [
@@ -125,13 +126,14 @@ function SuiteEditor({ suite, reports, defaults, timezone, onDone }) {
         ${LIMITS.map(([k, label, min, max]) => html`<${Field} label=${label}><input type="number" min=${min} max=${max} value=${c.limits[k]} onInput=${num('limits', k)} /></${Field}>`)}
       </div></div>
       <div class="fieldset"><h4>🤖 AI analysis (NVIDIA open models)</h4><div class="grid g2">
-        <${Check} label="AI summary, triage & data-anomaly review" desc="Runs automatically after each run when NVIDIA_API_KEY is set." checked=${c.ai?.enabled !== false} onChange=${(v) => setC({ ...c, ai: { ...c.ai, enabled: v } })} />
-        <${Check} label="Explain screenshot differences" desc="Sends the A/B screenshots of the top differences to the vision model." checked=${c.ai?.vision !== false} onChange=${(v) => setC({ ...c, ai: { ...c.ai, vision: v } })} />
-      </div><div class="form-grid g3" style="margin-top:10px"><${Field} label="Max screenshots to explain per run"><input type="number" min="0" max="50" value=${c.ai?.maxVisionItems ?? 8} onInput=${(e) => setC({ ...c, ai: { ...c.ai, maxVisionItems: Number(e.target.value) } })} /></${Field}></div></div>
+        <${Check} label="AI analysis of the values" desc="After each run: summary, triage, the value differences explained visual by visual, and a data-anomaly review. Works from the values of both reports, not from their pictures." checked=${c.ai?.enabled !== false} onChange=${(v) => setC({ ...c, ai: { ...c.ai, enabled: v } })} />
+        <${Check} label="Also describe look-only differences from screenshots" desc="Off by default. Sends the A/B screenshots of checks whose values are the same but that look different to the vision model." checked=${c.ai?.screenshots === true} onChange=${(v) => setC({ ...c, ai: { ...c.ai, screenshots: v } })} />
+      </div><div class="form-grid g3" style="margin-top:10px"><${Field} label="Max screenshots to describe per run"><input type="number" min="0" max="50" value=${c.ai?.maxVisionItems ?? 8} onInput=${(e) => setC({ ...c, ai: { ...c.ai, maxVisionItems: Number(e.target.value) } })} /></${Field}></div></div>
       <${Check} label="Reset to default on load" desc="Service only — clicks “Reset to default” so personal/persistent filters never skew results." checked=${c.resetToDefaultOnLoad} onChange=${(v) => setC({ ...c, resetToDefaultOnLoad: v })} />
     </div>`}
 
     ${tab === 'tolerances' && html`<div class="stack">
+      ${!c.scenarios.appearance && html`<div class="callout info small">Results are decided by values. The pixel, position and size settings below are used only when <b>Compare appearance</b> is on (Scenarios tab).</div>`}
       <div class="fieldset"><h4>Thresholds</h4><div class="form-grid g3">
         <${Field} label="Max differing pixels (%)" hint="Above this a screenshot is a diff."><input type="number" step="0.01" min="0" max="100" value=${+(c.thresholds.maxDiffRatio * 100).toFixed(4)} onInput=${(e) => setIn('thresholds', 'maxDiffRatio', Number(e.target.value) / 100)} /></${Field}>
         <${Field} label="Per-pixel colour tolerance" hint="0 = exact, 0.1 = default, 0.3 = lenient."><input type="number" step="0.01" min="0" max="1" value=${c.thresholds.pixelThreshold} onInput=${num('thresholds', 'pixelThreshold')} /></${Field}>

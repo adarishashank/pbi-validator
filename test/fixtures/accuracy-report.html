@@ -52,11 +52,15 @@ function render() {
   if (DIFF.has('order')) pts.reverse();
   const labels = DIFF.has('labels') ? [5] : [5, 5];
   let h = '';
-  h += vc({ id: ID.card, type: 'card', role: 'Card', title: 'Revenue', x: 10, y: 10, w: 600, h: 300,
+  // "size": the card is smaller and the chart has moved. "short": the table is
+  // lower and draws one row less. "fewer": the same row is not drawn at the same size.
+  const size = DIFF.has('size'), short = DIFF.has('short');
+  const rows = [['Region', 'Orders'], ['North', 12], ...(short || DIFF.has('fewer') ? [] : [['South', 9]])];
+  h += vc({ id: ID.card, type: 'card', role: 'Card', title: 'Revenue', x: 10, y: 10, w: size ? 540 : 600, h: size ? 270 : 300,
     body: `<div class="big">1.2M</div><div style="position:absolute;left:400px;top:150px;width:8px;height:8px;background:${DIFF.has('dot') ? '#000' : '#fff'}"></div>` });
-  h += vc({ id: ID.table, type: 'tableEx', role: 'Table', title: 'Orders', x: 620, y: 10, w: 400, h: 150,
-    body: `<div role="grid">${[['Region', 'Orders'], ['North', 12], ['South', 9]].map((r) => `<div role="row">${r.map((c) => `<div role="gridcell">${c}</div>`).join('')}</div>`).join('')}</div>` });
-  h += vc({ id: ID.chart, type: 'clusteredColumnChart', role: 'Clustered column chart', title: 'Sales by Region', x: 620, y: 170, w: 400, h: 240,
+  h += vc({ id: ID.table, type: 'tableEx', role: 'Table', title: 'Orders', x: 620, y: 10, w: 400, h: short ? 90 : 150,
+    body: `<div role="grid">${rows.map((r) => `<div role="row">${r.map((c) => `<div role="gridcell">${c}</div>`).join('')}</div>`).join('')}</div>` });
+  h += vc({ id: ID.chart, type: 'clusteredColumnChart', role: 'Clustered column chart', title: 'Sales by Region', x: size ? 660 : 620, y: size ? 200 : 170, w: 400, h: 240,
     body: `<svg width="380" height="200">${pts.map(([k, v], i) => `<rect class="bar" role="option" aria-label="${k}" x="${20 + i * 80}" y="${180 - v}" width="50" height="${v}" fill="#3a7"></rect>`).join('')}
       ${labels.map((l, i) => `<text x="${250 + i * 40}" y="40">${l}</text>`).join('')}</svg>` });
   h += vc({ type: 'card', role: 'Card', title: 'Selected', x: 10, y: 320, w: 300, h: 90, body: `<div class="big">${esc(st.picked || 'none')}</div>` });

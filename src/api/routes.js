@@ -69,8 +69,8 @@ router.post('/runs/:id/ai/analyze', wrap((req, res) => {
   const id = idParam(req); const run = mustGet('runs', id);
   if (['queued', 'running'].includes(run.status)) throw httpError(409, 'Wait for the run to finish');
   if (!aiStatus().configured) throw httpError(503, 'AI is not configured: set NVIDIA_API_KEY in .env (free key at build.nvidia.com) and restart');
-  const vision = req.body?.vision !== false && run.snapshot?.config?.ai?.vision !== false;
-  analyzeRun(id, { vision }).catch(() => {});
+  const ai = run.snapshot?.config?.ai || {};
+  analyzeRun(id, { screenshots: ai.screenshots === true, maxVision: ai.maxVisionItems }).catch(() => {});
   res.status(202).json({ started: true });
 }));
 router.post('/results/:id/ai/explain', wrap(async (req, res) => {

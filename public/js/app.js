@@ -32,7 +32,7 @@ function Health() {
 function AiBadge() {
   const { data } = useApi('/ai/status');
   if (!data) return null;
-  return html`<div style="margin-top:6px" title=${data.configured ? `${data.textModel} · ${data.visionModel}` : 'Set NVIDIA_API_KEY to enable'}>🤖 AI: ${data.configured ? html`<span style="color:#a78bfa">NVIDIA ${data.textModel.split('/').pop()}</span>` : 'not configured'}</div>`;
+  return html`<div style="margin-top:6px" title=${data.configured ? `${data.textModel} · works from the values of the reports` : 'Set NVIDIA_API_KEY to enable'}>🤖 AI: ${data.configured ? html`<span style="color:#a78bfa">NVIDIA ${data.textModel.split('/').pop()}</span>` : 'not configured'}</div>`;
 }
 
 function UserMenu({ user, top }) {

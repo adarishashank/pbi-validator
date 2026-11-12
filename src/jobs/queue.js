@@ -237,7 +237,7 @@ class RunQueue {
         log('info', 'AI analysis skipped because every check passed');
       } else {
         log('info', `AI analysis queued (${config.ai.textModel})`);
-        analyzeRun(runId, { vision: aiCfg.vision !== false, maxVision: aiCfg.maxVisionItems ?? config.ai.maxVisionItems })
+        analyzeRun(runId, { screenshots: aiCfg.screenshots === true, maxVision: aiCfg.maxVisionItems ?? config.ai.maxVisionItems })
           .catch((e) => logger.warn(`AI analysis of run #${runId} failed: ${e.message}`));
       }
     }

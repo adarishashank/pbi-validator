@@ -275,7 +275,7 @@ function System() {
       <div class="panel"><div class="panel-h"><h3>AI analysis</h3>${data.ai.configured ? html`<span class="badge b-pass">Connected</span>` : html`<span class="badge b-skipped">Not configured</span>`}</div><div class="panel-b"><dl class="kv">
         <dt>Provider</dt><dd>${data.ai.provider || '—'}</dd>
         <dt>Text model</dt><dd class="mono">${data.ai.textModel}</dd>
-        <dt>Vision model</dt><dd class="mono">${data.ai.visionModel}</dd>
+        <dt>Screenshot model (only if a suite asks)</dt><dd class="mono">${data.ai.visionModel}</dd>
         <dt>Screenshots to AI</dt><dd>${data.ai.imagesAllowed ? 'Allowed' : 'Never sent'}</dd>
       </dl>${!data.ai.configured && html`<p class="small muted">Add <code>NVIDIA_API_KEY</code> to <code>.env</code> and restart to enable.</p>`}</div></div>
     </div>

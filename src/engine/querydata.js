@@ -82,7 +82,7 @@ function walkMembers(rows, prefix, dicts, lines, state) {
 
 /**
  * Turns one query result into comparable lines: a header with the field
- * names, then one line per row. Returns { lines, rows, complete, error, opaque }.
+ * names, then one line per row. Returns { lines, rows, complete, error, opaque, fields }.
  */
 export function decodeQueryResult(data, { cap = 5000 } = {}) {
   const select = data?.descriptor?.Select || [];
@@ -108,7 +108,7 @@ export function decodeQueryResult(data, { cap = 5000 } = {}) {
       }
       for (const ph of ds.PH || []) for (const key of Object.keys(ph)) if (Array.isArray(ph[key])) walkMembers(ph[key], [], ds.ValueDicts, lines, state);
     }
-    return { lines: header ? [header, ...lines] : lines, rows: lines.length, complete: complete && !state.truncated, error: null };
+    return { lines: header ? [header, ...lines] : lines, rows: lines.length, complete: complete && !state.truncated, error: null, fields: select.map((x) => String(x.Name || x.Value || '')) };
   } catch {
     // Unknown layout: still comparable as a whole, just not row by row.
     const hash = crypto.createHash('sha1').update(JSON.stringify(sets.map((ds) => [ds.PH, ds.SH, ds.ValueDicts]))).digest('hex').slice(0, 16);

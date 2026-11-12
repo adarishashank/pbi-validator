@@ -56,7 +56,8 @@ export function runSheets(bundle) {
   const reps = run.snapshot?.reports || {};
   const c = counts(results);
   const S = done(ai.summary), AN = done(ai.anomalies);
-  const vision = ai.vision || {};
+  const explain = ai.explain || ai.vision || {};
+  const VA = done(ai.values);
   const summary = [
     ['Suite', run.suite_name], ['Run', `#${run.id}`], ['Result', RUN_STATUS_LABEL[run.status] || run.status],
     ['Started', fmtDate(run.started_at || run.queued_at)], ['Finished', fmtDate(run.finished_at)], ['Duration', fmtDur(runDurationMs(run))],
@@ -70,13 +71,13 @@ export function runSheets(bundle) {
   ].map(([field, value]) => ({ field, value }));
 
   const resultRows = [...results].sort((a, b) => a.seq - b.seq).map((r) => {
-    const v = done(vision[r.id]);
+    const v = done(explain[r.id]);
     return {
       seq: r.seq, status: STATUS_LABEL[r.status] || r.status, scenario: SCENARIO_LABEL[r.scenario] || r.scenario, page: r.page || 'Report',
       title: r.title, target: r.target || '', diff: r.diff_ratio != null ? Number((r.diff_ratio * 100).toFixed(4)) : null,
       secs: r.duration_ms != null ? Number((r.duration_ms / 1000).toFixed(1)) : null,
       details: r.status === 'pass' ? '' : r.status === 'accepted' ? acceptedText(r) : describe(r),
-      vision: v ? `${v.whatChanged}${v.likelyNoise ? ' (likely rendering noise)' : ''}` : '',
+      vision: v ? `${v.whatChanged}${v.likelyCause ? ` Likely cause: ${v.likelyCause}` : ''}` : '',
     };
   });
 
@@ -85,7 +86,12 @@ export function runSheets(bundle) {
     for (const f of S.findings || []) aiRows.push({ type: 'Finding', level: f.severity, category: f.category, title: f.title, detail: f.explanation, action: f.recommendation, refs: (f.resultRefs || []).map((x) => `#${x}`).join(' ') });
     for (const rc of S.rootCauses || []) aiRows.push({ type: 'Likely root cause', level: `${rc.confidence} confidence`, title: rc.cause, detail: rc.evidence, refs: (rc.resultRefs || []).map((x) => `#${x}`).join(' ') });
     (S.nextSteps || []).forEach((x, i) => aiRows.push({ type: 'Next step', level: `${i + 1}`, title: x }));
-    for (const n of S.noise || []) aiRows.push({ type: 'Likely noise', title: n.reason, refs: (n.resultRefs || []).map((x) => `#${x}`).join(' ') });
+    for (const n of S.noise || []) aiRows.push({ type: 'Looks different, same values', title: n.reason, refs: (n.resultRefs || []).map((x) => `#${x}`).join(' ') });
+  }
+  if (VA) {
+    for (const c of VA.changes || []) aiRows.push({ type: 'Value difference', level: c.severity, category: `${c.page} · ${c.visual}`, title: c.whatChanged, detail: [(c.details || []).join('; '), c.pattern ? `Pattern: ${c.pattern}` : ''].filter(Boolean).join(' — '), action: c.likelyCause ? `Likely cause: ${c.likelyCause}` : '', refs: `#${c.resultRef}` });
+    for (const l of VA.links || []) aiRows.push({ type: 'Same change in several visuals', title: l.observation, refs: (l.resultRefs || []).map((x) => `#${x}`).join(' ') });
+    if (VA.assessment) aiRows.push({ type: 'Value assessment', title: VA.assessment });
   }
   if (AN) {
     for (const a of AN.anomalies || []) aiRows.push({ type: 'Data anomaly', level: a.severity, category: `${a.page} · ${a.visual}`, title: a.issue, detail: a.evidence, refs: (a.resultRefs || []).map((x) => `#${x}`).join(' ') });
@@ -101,7 +107,7 @@ export function runSheets(bundle) {
         { key: 'seq', header: '#', width: 6 }, { key: 'status', header: 'Status', width: 10 }, { key: 'scenario', header: 'Scenario', width: 15 },
         { key: 'page', header: 'Page', width: 28 }, { key: 'title', header: 'Check', width: 50, wrap: true }, { key: 'target', header: 'Target', width: 24 },
         { key: 'diff', header: 'Pixels different (%)', width: 18 }, { key: 'secs', header: 'Duration (s)', width: 12 },
-        { key: 'details', header: 'What went wrong', width: 70, wrap: true }, { key: 'vision', header: 'AI screenshot review', width: 60, wrap: true },
+        { key: 'details', header: 'What went wrong', width: 70, wrap: true }, { key: 'vision', header: 'AI explanation (from the values)', width: 60, wrap: true },
       ],
       rows: resultRows,
     },
@@ -356,7 +362,8 @@ export function reportHtml(bundle, { maxIssues = 40, maxPageShots = 24, includeI
   const c = counts(results);
   const total = results.length || 1;
   const S = done(ai.summary), AN = done(ai.anomalies);
-  const vision = ai.vision || {};
+  const explain = ai.explain || ai.vision || {};
+  const VA = done(ai.values);
   const problems = results.filter((r) => PROBLEM.has(r.status)).sort((a, b) => rank(a.status) - rank(b.status) || a.seq - b.seq);
   const reportLine = (side, rep) => (rep ? `<div class="full"><b>Report ${side}</b><span>${esc(rep.name)}${rep.environment ? ` · ${esc(rep.environment)}` : ''}<br><span class="mono muted">${esc(rep.url || '')}</span></span></div>` : '');
 
@@ -409,9 +416,15 @@ export function reportHtml(bundle, { maxIssues = 40, maxPageShots = 24, includeI
     }
     if (S.rootCauses?.length) h += `<h3>Likely root causes</h3><ul>${S.rootCauses.map((x) => `<li><b>${esc(x.cause)}</b> <span class="muted">(${esc(x.confidence)} confidence)</span>: ${esc(x.evidence)}${refs(x.resultRefs)}</li>`).join('')}</ul>`;
     if (S.nextSteps?.length) h += `<h3>Recommended next steps</h3><ol>${S.nextSteps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`;
-    if (S.noise?.length) h += `<h3>Probably not real problems</h3><ul>${S.noise.map((n) => `<li>${esc(n.reason)}${refs(n.resultRefs)}</li>`).join('')}</ul>`;
+    if (S.noise?.length) h += `<h3>Looks different, same values</h3><ul>${S.noise.map((n) => `<li>${esc(n.reason)}${refs(n.resultRefs)}</li>`).join('')}</ul>`;
   } else {
     h += `<div class="note">AI analysis ${ai.summary?.status === 'error' ? `failed for this run: ${esc(ai.summary.error || '')}` : 'was not run for this run'}. Open the run in PBI Report Test and use “AI insights” to run it, then export again.</div>`;
+  }
+  if (VA?.changes?.length) {
+    h += `<h3>Value differences explained</h3>${VA.assessment ? `<p>${esc(VA.assessment)}</p>` : ''}
+      <table><thead><tr><th style="width:70px">Severity</th><th style="width:24%">Where</th><th>What happened to the values</th><th style="width:26%">Likely cause</th></tr></thead><tbody>
+      ${VA.changes.map((c) => `<tr><td><span class="pill k-${esc(c.severity)}">${esc(c.severity)}</span></td><td>${esc(c.page)}<br><b>${esc(c.visual)}</b>${refs([c.resultRef])}</td><td>${esc(c.whatChanged)}${(c.details || []).length ? `<br><span class="muted mono">${c.details.slice(0, 5).map(esc).join('<br>')}</span>` : ''}</td><td>${esc(c.likelyCause || '')}${c.pattern ? `<br><span class="muted">Pattern: ${esc(c.pattern)}</span>` : ''}</td></tr>`).join('')}</tbody></table>`;
+    if (VA.links?.length) h += `<p><b>The same change in several visuals</b></p><ul>${VA.links.map((l) => `<li>${esc(l.observation)}${refs(l.resultRefs)}</li>`).join('')}</ul>`;
   }
   if (AN) {
     h += `<h3>Data anomalies</h3>${AN.assessment ? `<p>${esc(AN.assessment)}</p>` : ''}`;
@@ -424,12 +437,12 @@ export function reportHtml(bundle, { maxIssues = 40, maxPageShots = 24, includeI
     h += `<h2 class="page-break">Checks needing attention (${problems.length})</h2>`;
     if (problems.length > maxIssues) h += `<p class="muted">Showing the ${maxIssues} most severe. Every check is listed in the appendix.</p>`;
     for (const r of problems.slice(0, maxIssues)) {
-      const v = done(vision[r.id]);
+      const v = done(explain[r.id]);
       const shots = includeImages ? shotsFor(r, dir, names) : [];
       h += `<div class="issue"><div class="t"><span class="pill s-${esc(r.status)}">${esc(STATUS_LABEL[r.status] || r.status)}</span><span>#${r.seq} · ${esc(r.title)}</span></div>
         <div class="muted small">${esc(SCENARIO_LABEL[r.scenario] || r.scenario)} · page: ${esc(r.page || 'Report')}${r.diff_ratio != null ? ` · ${pct(r.diff_ratio)} pixels differ` : ''}</div>
         <div class="why">${esc(describe(r))}</div>
-        ${v ? `<div class="vision">AI screenshot review: ${esc(v.whatChanged)}${v.likelyNoise ? ' (likely rendering noise)' : ''}</div>` : ''}
+        ${v ? `<div class="vision">AI explanation: ${esc(v.whatChanged)}${v.likelyCause ? ` Likely cause: ${esc(v.likelyCause)}` : ''}</div>` : ''}
         ${shots.length ? `<div class="shots">${shots.map(([cap, f]) => `<figure><figcaption>${esc(cap)}</figcaption><img src="${encodeURIComponent(f)}"></figure>`).join('')}</div>` : ''}</div>`;
     }
   } else if (includeImages) {

@@ -82,7 +82,7 @@ export function matchVisuals(visA, visB) {
 }
 
 /** Structural comparison of a matched page. */
-export function structuralDiff(match, { positionTolerancePx = 4 } = {}) {
+export function structuralDiff(match, { positionTolerancePx = 4 } = {}, { layout = true } = {}) {
   const issues = [];
   for (const v of match.onlyA) issues.push({ kind: 'missing_in_b', visual: visualLabel(v), box: v.box });
   for (const v of match.onlyB) issues.push({ kind: 'extra_in_b', visual: visualLabel(v), box: v.box });
@@ -90,8 +90,9 @@ export function structuralDiff(match, { positionTolerancePx = 4 } = {}) {
     if (normName(a.title) !== normName(b.title)) issues.push({ kind: 'title_changed', visual: visualLabel(a), a: a.title, b: b.title });
     const dx = Math.abs(a.box.x - b.box.x), dy = Math.abs(a.box.y - b.box.y);
     const dw = Math.abs(a.box.w - b.box.w), dh = Math.abs(a.box.h - b.box.h);
-    if (Math.max(dx, dy) > positionTolerancePx) issues.push({ kind: 'moved', visual: visualLabel(a), a: a.box, b: b.box });
-    if (Math.max(dw, dh) > positionTolerancePx) issues.push({ kind: 'resized', visual: visualLabel(a), a: a.box, b: b.box });
+    // Where a visual sits and how large it is: only when appearance is compared.
+    if (layout && Math.max(dx, dy) > positionTolerancePx) issues.push({ kind: 'moved', visual: visualLabel(a), a: a.box, b: b.box });
+    if (layout && Math.max(dw, dh) > positionTolerancePx) issues.push({ kind: 'resized', visual: visualLabel(a), a: a.box, b: b.box });
     if (!!a.error !== !!b.error) issues.push({ kind: 'error_state', visual: visualLabel(a), a: a.error, b: b.error });
   }
   return issues;

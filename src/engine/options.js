@@ -17,9 +17,14 @@ export const SuiteConfigSchema = z.object({
     exclude: z.array(z.string()).default([]),
   }).prefault({}),
   scenarios: z.object({
-    pageRender: z.boolean().default(true),     // full page screenshot diff + health
-    structure: z.boolean().default(true),      // visual inventory, type, title, layout
-    visuals: z.boolean().default(true),        // per-visual screenshot + data diff
+    pageRender: z.boolean().default(true),     // full page screenshot + health
+    structure: z.boolean().default(true),      // visual inventory, type, title
+    visuals: z.boolean().default(true),        // per-visual values (text on screen, data behind it)
+    // Off (default): a check is decided by values, content and behaviour only. Screenshots are
+    // taken as evidence but not compared, and the size and position of visuals are not compared,
+    // so a visual that is larger, moved or styled differently is not a difference.
+    // On: screenshots are also compared pixel by pixel, and moved or resized visuals are reported.
+    appearance: z.boolean().default(false),
     buttons: z.boolean().default(true),        // action buttons / navigators / bookmarks
     slicers: z.boolean().default(true),        // apply slicer values, compare whole page
     drill: z.boolean().default(true),          // hierarchy drill down / expand next level
@@ -74,8 +79,10 @@ export const SuiteConfigSchema = z.object({
     actionTimeoutMs: z.number().int().min(1000).max(120000).default(15000),
   }).prefault({}),
   ai: z.object({
-    enabled: z.boolean().default(true),        // AI summary, triage & anomaly analysis after each run
-    vision: z.boolean().default(true),         // send diff screenshots to the vision model
+    enabled: z.boolean().default(true),        // AI summary, triage, value differences & anomaly analysis after each run
+    // The AI works from values. On: checks whose values are the same and that only
+    // look different are also sent to the vision model as screenshots.
+    screenshots: z.boolean().default(false),
     maxVisionItems: z.number().int().min(0).max(50).default(8),
   }).prefault({}),
   // Fixed slicer selections applied to both reports before comparing, e.g.
